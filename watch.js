@@ -21,7 +21,7 @@ Example:
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
     --transform -t    Files matching this glob are passed through the transformer. Optional.
-    --using -u        The transformer. A JS file which has at least \`default export (fpath, contents) => {return contents}\`. Optional.
+    --using -u        The transformer. A JS file which has at least \`default export (inputPath, outputPath, contents) => {return contents}\`. Optional.
     --output -o       The output directory. Required.
     --exec -e         The command to exec after rebuild. Required.
     --debug -d        Log statements about node_modules are excluded by default.`)
@@ -57,6 +57,18 @@ Options:
 
   let execTimeout
   let child
+
+  process.on("SIGINT", () => {
+    console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
+    if (child) {
+      child.kill('SIGINT')
+      child.kill('SIGTERM')
+      child.kill('SIGKILL')
+      process.kill(-child.pid)
+      process.exit()
+    }
+  })
+
   function queueExec() {
     if (execTimeout) {
       clearTimeout(execTimeout)
@@ -64,15 +76,22 @@ Options:
     }
     if (child) {
       console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
-      child.kill('SIGUSR2')
+      child.kill('SIGINT')
+      child.kill('SIGTERM')
+      child.kill('SIGKILL')
+      process.kill(-child.pid)
       child = null
     }
     execTimeout = setTimeout(() => {
+      // console.log('pipe eerr')
       console.log(`${c.green('[monitor]')} ${c.grey(command)}`)
-      child = spawn(command.split(' ')[0], command.split(' ').slice(1))
-      child.stdout.on('data', (data) => {
-        console.log(data.toString())
+      child = spawn(command.split(' ')[0], command.split(' ').slice(1), {
+        stdio: ['pipe', process.stdout, process.stderr],
+        detached: true
       })
+      // child.stdout.on('data', (data) => {
+      //   console.log(data.toString())
+      // })
     }, 100)
   }
 
@@ -97,17 +116,17 @@ Options:
         }
       }
     } else if (shouldTransform) {
-      const contents = fs.readFileSync(originalPath, {encoding: 'utf8'})
-      const newContents = transform(filepath, contents)
-      fs.writeFileSync(filepath, newContents, {encoding: "utf-8"})
       if (shouldLog) {
-        console.log(`${c.green('[monitor]')} ${c.grey(`${c.blueBright('transpiled')} ${shortFilepath}`)}`)
+        console.log(`${c.green('[monitor]')} ${c.grey(`${c.blueBright('transpiling')} ${f}`)}`)
       }
+      const contents = fs.readFileSync(originalPath, {encoding: 'utf8'})
+      const newContents = transform(originalPath, filepath, contents)
+      fs.writeFileSync(filepath, newContents, {encoding: "utf-8"})
       queueExec()
     } else {
       fs.copySync(originalPath, filepath)
       if (shouldLog) {
-        console.log(`${c.green('[monitor]')} ${c.grey(`${c.blue('copied')} ${shortFilepath}`)}`)
+        console.log(`${c.green('[monitor]')} ${c.grey(`${c.blue('copied')} ${f}`)}`)
       }
       queueExec()
     }
