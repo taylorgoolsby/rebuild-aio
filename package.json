@@ -5,6 +5,17 @@
   "repository": "git@github.com:grainstackdev/monitor-transform.git",
   "author": "grainstackdev <99065516+grainstackdev@users.noreply.github.com>",
   "license": "MIT",
+  "description": "A watcher with a customizable transpilation.",
+  "keywords": [
+    "monitor",
+    "transpiler",
+    "plugin",
+    "watch",
+    "watcher",
+    "nodemon",
+    "supervisor",
+    "rebuild"
+  ],
   "bin": {
     "monitor": "watch.js"
   },
