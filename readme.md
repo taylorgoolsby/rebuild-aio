@@ -1,4 +1,4 @@
-# monitor-transpile
+# monitor-transform
 
 > A watcher with a customizable transpilation.
 
