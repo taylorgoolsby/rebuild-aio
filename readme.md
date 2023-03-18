@@ -9,7 +9,7 @@ Usage:
     monitor --watch <glob> [--transform <glob>] [--using <file.js>] --output <dir> --exec <string>
     
 Example:
-    monitor --watch src --transform src/*/src --using scripts/transformer.js --output build --exec 'echo "server started"'
+    monitor --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --exec 'echo "server started"'
  
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
