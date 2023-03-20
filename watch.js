@@ -65,12 +65,13 @@ Options:
   process.on("SIGINT", () => {
     if (child) {
       child.on('exit', async () => {
-        console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
         for (const port of killPorts) {
           await new Promise((resolve) => {
+            console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
             kill(port).then(() => {resolve()})
           })
         }
+        console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
         process.exit()
       })
       child.kill('SIGINT')
@@ -145,7 +146,11 @@ Options:
 
   for (const dir of watchDirs) {
     // Tell it what to watch
-    console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('watching')} ${dir}`)}`)
+    if (command) {
+      console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('watching')} ${dir}`)}`)
+    } else {
+      console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('building')} ${dir} -> ${outDir}`)}`)
+    }
     watch.watchTree(dir, {interval: 0.1}, (f, curr, prev) => {
       if (typeof f == "object" && prev === null && curr === null) {
         // Finished walking the tree on startup
@@ -155,6 +160,7 @@ Options:
         }
         if (!command) {
           // No command, so exit after building instead of watching.
+          console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('built')} ${dir} -> ${outDir}`)}`)
           process.exit()
         }
       } else {
