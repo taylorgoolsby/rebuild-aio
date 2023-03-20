@@ -7,23 +7,25 @@ import {spawn} from 'child_process'
 import fs from 'fs-extra'
 import path from 'path'
 import micromatch from 'micromatch'
+import {kill} from "cross-port-killer";
 
 const argv = minimist(process.argv.slice(2))
 const help = argv['h'] || argv['help']
 
 if (help) {
   console.log(`Usage:
-    monitor --watch <glob> [--transform <glob>] [--using <file.js>] --output <dir> --exec <string>
+    rebuild --watch <glob> [--transform <glob>] [--using <file.js>] --output <dir> --exec <string>
     
 Example:
-    monitor --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --exec 'echo "server started"'
+    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --exec 'echo "server started"'
  
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
     --transform -t    Files matching this glob are passed through the transformer. Optional.
     --using -u        The transformer. A JS file which has at least \`default export (inputPath, outputPath, contents) => {return contents}\`. Optional.
     --output -o       The output directory. Required.
-    --exec -e         The command to exec after rebuild. Required.
+    --exec -e         The command to exec after rebuild. Optional. If omitted, then rebuild will exit after the first build. This is useful for packaging before deploying.
+    --kill -k         A port to kill on ctrl+c. Optional. Multiple allowed.
     --debug -d        Log statements about node_modules are excluded by default.`)
 } else {
   const w = argv['w'] || argv['watch']
@@ -33,6 +35,8 @@ Options:
   const transformer = argv['using'] || argv['u']
   const command = argv['exec'] || argv['e']
   const debug = argv['d'] || argv['debug']
+  const k = argv['k'] || argv['kill']
+  const killPorts = Array.isArray(k) ? k : [k]
 
   if (watchDirs.length === 0) {
     throw new Error('At least one --watch (-w) option must be specified. -w is a directory to watch.')
@@ -59,40 +63,47 @@ Options:
   let child
 
   process.on("SIGINT", () => {
-    console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
     if (child) {
+      child.on('exit', async () => {
+        console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
+        for (const port of killPorts) {
+          await new Promise((resolve) => {
+            kill(port).then(() => {resolve()})
+          })
+        }
+        process.exit()
+      })
       child.kill('SIGINT')
-      child.kill('SIGTERM')
-      child.kill('SIGKILL')
-      process.kill(-child.pid)
-      process.exit()
     }
   })
 
   function queueExec() {
+    if (!command) {
+      return
+    }
     if (execTimeout) {
       clearTimeout(execTimeout)
       execTimeout = null
     }
-    if (child) {
-      console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
-      child.kill('SIGINT')
-      child.kill('SIGTERM')
-      child.kill('SIGKILL')
-      process.kill(-child.pid)
-      child = null
-    }
-    execTimeout = setTimeout(() => {
-      // console.log('pipe eerr')
+    const makeChild = () => {
       console.log(`${c.green('[monitor]')} ${c.grey(command)}`)
       child = spawn(command.split(' ')[0], command.split(' ').slice(1), {
         stdio: ['pipe', process.stdout, process.stderr],
-        detached: true
       })
-      // child.stdout.on('data', (data) => {
-      //   console.log(data.toString())
-      // })
-    }, 100)
+    }
+    if (child) {
+      execTimeout = setTimeout(() => {
+        console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
+        child.on('exit', () => {
+          console.log('exit')
+          child = null
+          makeChild()
+        })
+        child.kill()
+      }, 100)
+    } else {
+      execTimeout = setTimeout(makeChild, 100)
+    }
   }
 
   function getOutDirPath(filepath) {
@@ -141,6 +152,10 @@ Options:
         // Move all files into outDir
         for (const key of Object.keys(f)) {
           pass(key)
+        }
+        if (!command) {
+          // No command, so exit after building instead of watching.
+          process.exit()
         }
       } else {
         const isNew = prev === null
