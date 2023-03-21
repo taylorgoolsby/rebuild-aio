@@ -91,11 +91,13 @@ export default async function transform(filepath, outputPath, contents) {
 
 `--fork` causes the child process to be created using `fork`. This is useful for implementing graceful restarts.
 
+The argument passed to `--fork` must be an ES module, I.E. a JS file. It cannot run CLI commands directly.
+
 `--spawn` causes the child process to be created using `spawn`, but restarts terminate the process abruptly.
 
 ## SIGTERM
 
-When using `--spawn`, restarts use `child.kill()`, which sends SIGTERM in non-Windows environments. In all environments, `child.kill()` the child process is ended abruptly, and on Linux, any of their subprocesses will not be terminated.
+When using `--spawn`, restarts use `child.kill()`, which sends SIGTERM in non-Windows environments. In all environments, using `child.kill()`, the child process is ended abruptly, and on Linux, any of their subprocesses will not be terminated.
 
 Because of these issues, it is recommended to use `--fork` and to implement a `SIGRES` handler in your code.
 
@@ -136,9 +138,11 @@ If you need to kill ports on restarts, use a custom `--cleanup` function.
 
 Similar to `--transform`, this is a JS file which has a `default export`.
 
+Cleanup is called on ctrl+c interrupts and restarts.
+
 The `cleanup(child, spawnerType, signal)` function takes in the `child` which is a child process obtained from spawn or fork, and a `signal` whose value is either `SIGINT` or `SIGRES`. 
 
-Teh function should either send a kill signal to the child and wait for it to exit itself, or abruptly kill the process using `child.kill()`.
+The function should either send a kill signal to the child and wait for it to exit itself, or abruptly kill the process using `child.kill()`.
 
 You can send a kill signal to the child, with cross-platform support, using `--fork` and `child.send('SIGRES')`. This will cause the `child` to be a forked process, which allows messages between the parent and child to be passed using IPC.
 

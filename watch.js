@@ -98,7 +98,13 @@ ${c.yellow('Options:')}
   let execTimeout
   let child
 
+  let sigintHandled = false
   process.on("SIGINT", () => {
+    if (sigintHandled) {
+      return
+    }
+    sigintHandled = true
+
     if (child) {
       let cleanupTimeout
       const finalPortKilling = async () => {
@@ -149,6 +155,7 @@ ${c.yellow('Options:')}
         console.log(`${c.green('[monitor]')} ${c.yellow('fork')} ${c.grey(command)}`)
       }
       child = spawner(command.split(' ')[0], command.split(' ').slice(1), {
+        // todo: fix issue with cross-env duplicating stdio logs.
         stdio: spawner === fork ? ['pipe', process.stdout, process.stderr, 'ipc'] : ['pipe', process.stdout, process.stderr],
       })
     }
