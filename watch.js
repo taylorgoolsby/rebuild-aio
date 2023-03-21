@@ -10,10 +10,10 @@ import micromatch from 'micromatch'
 import {kill} from "cross-port-killer";
 
 const argv = minimist(process.argv.slice(2))
-const help = argv['h'] || argv['help']
+const help = argv['h'] || argv['help'] || Object.keys(argv).length === 1
 
 if (help) {
-  console.log(`Usage:
+  console.log(`${c.yellow('Usage:')}
     rebuild \\ 
     --watch <glob> \\ 
     [--transform <glob>] \\ 
@@ -24,20 +24,20 @@ if (help) {
     [--kill <number>] \\
     [--wait <number>] 
     
-Example:
+${c.yellow('Example:')}
     rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
 
-Options:
-    --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
-    --transform -t    Files matching this glob are passed through the transformer. Optional.
-    --using -u        The transformer. A JS file which has at least \`default export async (inputPath, outputPath, contents) => {return contents}\`. Optional.
-    --output -o       The output directory. Required.
-    --fork -f         The command to exec after rebuild. Optional. If omitted, then rebuild will exit after the first build. This is useful for packaging before deploying.
-    --spawn -s        The command to exec after rebuilds. Optional. If omitted, no rebuilding or monitoring happens.
-    --cleanup -c      A JS file which has at least \`default export async (childProcess) => {}\`. Optional.
-    --kill -k         A port to kill on ctrl+c. Optional. Multiple allowed.
-    --wait            How long to wait on file changes and termination before forcefully stopping the process. Optional.
-    --debug -d        Log statements about node_modules are excluded by default.`)
+${c.yellow('Options:')}
+    --watch -w        ${c.grey('A glob. All watched files go to the output, but some are transformed along the way. At least one required.')}
+    --transform -t    ${c.grey('Files matching this glob are passed through the transformer. Optional.')}
+    --using -u        ${c.grey('The transformer. A JS file. Default: `default export async (inputPath, outputPath, contents) => {return contents}`. Optional.')}
+    --output -o       ${c.grey('The output directory. Required.')}
+    --fork -f         ${c.grey('The restart command. Optional. If omitted, then rebuild will exit after the first build.')}
+    --spawn -s        ${c.grey('The restart command. Optional. If omitted, no rebuilding or monitoring happens.')}
+    --cleanup -c      ${c.grey('A JS file. Signature: `default export async (child, spawnerType, signal) => {}`. Optional.')}
+    --kill -k         ${c.grey('A port to kill on ctrl+c. Optional. Multiple allowed.')}
+    --wait            ${c.grey('How long to wait on file changes and termination before forcefully stopping the process. Default is 3000.')}
+    --debug -d        ${c.grey('Log statements about node_modules are excluded by default.')}`)
 } else {
   const w = argv['w'] || argv['watch']
   const watchDirs = Array.isArray(w) ? w : [w].filter(a => !!a)

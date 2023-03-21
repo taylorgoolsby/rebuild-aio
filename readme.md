@@ -22,13 +22,13 @@ Example:
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
     --transform -t    Files matching this glob are passed through the transformer. Optional.
-    --using -u        The transformer. A JS file which has at least `default export async (inputPath, outputPath, contents) => {return contents}`. Optional.
+    --using -u        The transformer. A JS file. Default: `default export async (inputPath, outputPath, contents) => {return contents}`. Optional.
     --output -o       The output directory. Required.
-    --fork -f         The command to exec after rebuild. Optional. If omitted, then rebuild will exit after the first build. This is useful for packaging before deploying.
-    --spawn -s        The command to exec after rebuilds. Optional. If omitted, no rebuilding or monitoring happens.
-    --cleanup -c      A JS file which has at least `default export async (childProcess) => {}`. Optional.
+    --fork -f         The restart command. Optional. If omitted, then rebuild will exit after the first build.
+    --spawn -s        The restart command. Optional. If omitted, no rebuilding or monitoring happens.
+    --cleanup -c      A JS file. Signature: `default export async (child, spawnerType, signal) => {}`. Optional.
     --kill -k         A port to kill on ctrl+c. Optional. Multiple allowed.
-    --wait            How long to wait on file changes and termination before forcefully stopping the process. Optional.
+    --wait            How long to wait on file changes and termination before forcefully stopping the process. Default is 3000.
     --debug -d        Log statements about node_modules are excluded by default.
 ```
 
