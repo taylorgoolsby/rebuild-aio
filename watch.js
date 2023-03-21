@@ -14,10 +14,21 @@ const help = argv['h'] || argv['help']
 
 if (help) {
   console.log(`Usage:
-    rebuild --watch <glob> [--transform <glob>] [--using <file.js>] --output <dir> --exec <string>
+    rebuild \ 
+    --watch <glob> \ 
+    [--transform <glob>] \ 
+    [--using <file.js>] \
+    --output <dir> \
+    [--exec <string>] \ 
+    [--kill <number>]
     
 Example:
-    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --exec 'echo "server started"'
+    rebuild \
+    --watch src \ 
+    --transform 'src/*/src/**/*.{js,mjs}' \ 
+    --using transformer.js \
+    --output build \
+    --exec 'echo "server started"'
  
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
@@ -54,7 +65,7 @@ Options:
     throw new Error('Only one --using (-u) option must be specified. -u is a JS file with a default export (fpath, contents) => {return contents}.')
   }
 
-  const transform = transformer ? (await import(path.resolve(transformer))).default : (fpath, contents) => {return contents}
+  const transform = transformer ? (await import(path.resolve(transformer))).default : async (filepath, outputPath, contents) => {return contents}
 
   fs.removeSync(outDir)
   fs.ensureDirSync(outDir)
@@ -112,7 +123,7 @@ Options:
     return path.resolve(outDir, split.slice(1).join('/'))
   }
 
-  function pass(f) {
+  async function pass(f) {
     const isNodeModule = f.includes('node_modules/')
     const originalPath = path.resolve(f)
     const filepath = getOutDirPath(f)
@@ -132,7 +143,10 @@ Options:
         console.log(`${c.green('[monitor]')} ${c.grey(`${c.blueBright('transpiling')} ${f}`)}`)
       }
       const contents = fs.readFileSync(originalPath, {encoding: 'utf8'})
-      const newContents = transform(originalPath, filepath, contents)
+      const newContents = await transform(originalPath, filepath, contents)
+      if (typeof newContents !== 'string') {
+        throw new Error('Returned value from custom transformer is not a string.')
+      }
       fs.writeFileSync(filepath, newContents, {encoding: "utf-8"})
       queueExec()
     } else {
@@ -151,12 +165,12 @@ Options:
     } else {
       console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('building')} ${dir} -> ${outDir}`)}`)
     }
-    watch.watchTree(dir, {interval: 0.1}, (f, curr, prev) => {
+    watch.watchTree(dir, {interval: 0.1}, async (f, curr, prev) => {
       if (typeof f == "object" && prev === null && curr === null) {
         // Finished walking the tree on startup
         // Move all files into outDir
         for (const key of Object.keys(f)) {
-          pass(key)
+          await pass(key)
         }
         if (!command) {
           // No command, so exit after building instead of watching.
@@ -170,7 +184,7 @@ Options:
         if (isNew || isChanged) {
           // pass through transform
           // place in outDir
-          pass(f)
+          await pass(f)
         } else if (isRemoved) {
           // remove from outDir
           const filepath = getOutDirPath(f)
