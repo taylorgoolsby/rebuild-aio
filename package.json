@@ -1,6 +1,6 @@
 {
   "name": "rebuild-aio",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "index.js",
   "repository": "git@github.com:grainstackdev/monitor-transform.git",
   "author": "grainstackdev <99065516+grainstackdev@users.noreply.github.com>",
