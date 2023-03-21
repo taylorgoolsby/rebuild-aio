@@ -3,7 +3,7 @@
 import minimist from 'minimist'
 import watch from 'watch'
 import c from 'ansi-colors'
-import {spawn} from 'child_process'
+import {fork, spawn} from 'child_process'
 import fs from 'fs-extra'
 import path from 'path'
 import micromatch from 'micromatch'
@@ -14,40 +14,43 @@ const help = argv['h'] || argv['help']
 
 if (help) {
   console.log(`Usage:
-    rebuild \ 
-    --watch <glob> \ 
-    [--transform <glob>] \ 
-    [--using <file.js>] \
-    --output <dir> \
-    [--exec <string>] \ 
-    [--kill <number>]
+    rebuild \\ 
+    --watch <glob> \\ 
+    [--transform <glob>] \\ 
+    [--using <file.js>] \\
+    --output <dir> \\
+    [--fork <string>] \\
+    [--spawn <string>] \\ 
+    [--kill <number>] \\
+    [--wait <number>] 
     
 Example:
-    rebuild \
-    --watch src \ 
-    --transform 'src/*/src/**/*.{js,mjs}' \ 
-    --using transformer.js \
-    --output build \
-    --exec 'echo "server started"'
- 
+    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
+
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
     --transform -t    Files matching this glob are passed through the transformer. Optional.
-    --using -u        The transformer. A JS file which has at least \`default export (inputPath, outputPath, contents) => {return contents}\`. Optional.
+    --using -u        The transformer. A JS file which has at least \`default export async (inputPath, outputPath, contents) => {return contents}\`. Optional.
     --output -o       The output directory. Required.
-    --exec -e         The command to exec after rebuild. Optional. If omitted, then rebuild will exit after the first build. This is useful for packaging before deploying.
+    --fork -f         The command to exec after rebuild. Optional. If omitted, then rebuild will exit after the first build. This is useful for packaging before deploying.
+    --spawn -s        The command to exec after rebuilds. Optional. If omitted, no rebuilding or monitoring happens.
+    --cleanup -c      A JS file which has at least \`default export async (childProcess) => {}\`. Optional.
     --kill -k         A port to kill on ctrl+c. Optional. Multiple allowed.
+    --wait            How long to wait on file changes and termination before forcefully stopping the process. Optional.
     --debug -d        Log statements about node_modules are excluded by default.`)
 } else {
   const w = argv['w'] || argv['watch']
-  const watchDirs = Array.isArray(w) ? w : [w]
+  const watchDirs = Array.isArray(w) ? w : [w].filter(a => !!a)
   const outDir = argv['output'] || argv['o']
   const transformGlob = argv['transform'] || argv['t']
   const transformer = argv['using'] || argv['u']
-  const command = argv['exec'] || argv['e']
+  const forkCommand = argv['fork'] || argv['f']
+  const spawnCommand = argv['spawn'] || argv['s']
   const debug = argv['d'] || argv['debug']
   const k = argv['k'] || argv['kill']
-  const killPorts = Array.isArray(k) ? k : [k]
+  const killPorts = Array.isArray(k) ? k : [k].filter(a => !!a)
+  const cleaner = argv['cleanup'] || argv['c']
+  const wait = argv['wait'] || 3000
 
   if (watchDirs.length === 0) {
     throw new Error('At least one --watch (-w) option must be specified. -w is a directory to watch.')
@@ -65,7 +68,29 @@ Options:
     throw new Error('Only one --using (-u) option must be specified. -u is a JS file with a default export (fpath, contents) => {return contents}.')
   }
 
+  if (forkCommand && spawnCommand) {
+    throw new Error('Only one of either --fork or --spawn can be specified, but not both.')
+  }
+
+  const command = forkCommand || spawnCommand
+  const spawner = (forkCommand && fork) || (spawnCommand && spawn)
+  const spawnerType = (forkCommand && 'fork') || (spawnCommand && 'spawn')
   const transform = transformer ? (await import(path.resolve(transformer))).default : async (filepath, outputPath, contents) => {return contents}
+  const clean = cleaner ? (await import(path.resolve(cleaner))).default : async (child, spawnerType, signal) => {
+    if (signal === 'SIGINT') {
+      console.log(`${c.green('[monitor]')} ${c.grey('SIGINT')}`)
+      child.kill('SIGINT') // child is expected to exit on its own
+    } else {
+      // SIGRES signal handling:
+      if (spawnerType === 'spawn') {
+        console.log(`${c.green('[monitor]')} ${c.grey('SIGTERM')}`)
+        child.kill()
+      } else if (spawnerType === 'fork') {
+        console.log(`${c.green('[monitor]')} ${c.grey('SIGRES')}`)
+        child.send('SIGRES') // child is expected to exit on its own
+      }
+    }
+  }
 
   fs.removeSync(outDir)
   fs.ensureDirSync(outDir)
@@ -75,17 +100,37 @@ Options:
 
   process.on("SIGINT", () => {
     if (child) {
-      child.on('exit', async () => {
-        for (const port of killPorts) {
-          await new Promise((resolve) => {
-            console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
-            kill(port).then(() => {resolve()})
-          })
+      let cleanupTimeout
+      const finalPortKilling = async () => {
+        if (debug) {
+          console.log(`${c.green('[monitor]')} ${c.grey(`exit`)}`)
         }
+        if (cleanupTimeout) {
+          clearTimeout(cleanupTimeout)
+          cleanupTimeout = null
+        }
+
+        for (const port of killPorts) {
+          console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
+          await kill(port)
+        }
+
         console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
         process.exit()
-      })
-      child.kill('SIGINT')
+      }
+
+      child.on('exit', finalPortKilling)
+      clean(child, spawnerType, 'SIGINT') // should send the SIGINT signal to the child, which causes it to exit.
+        .catch(err => {
+          console.error(err)
+        })
+
+      cleanupTimeout = setTimeout(() => {
+        console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`)
+        child.kill()
+      }, wait)
+    } else {
+      process.exit()
     }
   })
 
@@ -98,20 +143,39 @@ Options:
       execTimeout = null
     }
     const makeChild = () => {
-      console.log(`${c.green('[monitor]')} ${c.grey(command)}`)
-      child = spawn(command.split(' ')[0], command.split(' ').slice(1), {
-        stdio: ['pipe', process.stdout, process.stderr],
+      if (spawner === spawn) {
+        console.log(`${c.green('[monitor]')} ${c.yellow('spawn')} ${c.grey(command)}`)
+      } else if (spawner === fork) {
+        console.log(`${c.green('[monitor]')} ${c.yellow('fork')} ${c.grey(command)}`)
+      }
+      child = spawner(command.split(' ')[0], command.split(' ').slice(1), {
+        stdio: spawner === fork ? ['pipe', process.stdout, process.stderr, 'ipc'] : ['pipe', process.stdout, process.stderr],
       })
     }
     if (child) {
+      let killTimeout = setTimeout(() => {
+        console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`)
+        // when the program restarts, if the forked process does not exit, then kill it after `wait` time.
+        child.kill()
+      }, wait)
       execTimeout = setTimeout(() => {
+        // kill child before calling makeChild
         console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
         child.on('exit', () => {
-          console.log('exit')
+          if (debug) {
+            console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+          }
+          if (killTimeout) {
+            clearTimeout(killTimeout)
+            killTimeout = null
+          }
           child = null
           makeChild()
         })
-        child.kill()
+        clean(child, spawnerType, 'SIGRES')
+          .catch(err => {
+            console.error(err)
+          })
       }, 100)
     } else {
       execTimeout = setTimeout(makeChild, 100)
@@ -166,6 +230,10 @@ Options:
       console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('building')} ${dir} -> ${outDir}`)}`)
     }
     watch.watchTree(dir, {interval: 0.1}, async (f, curr, prev) => {
+      if (typeof f === 'string' && f.endsWith('~')) {
+        // f is temp file
+        return
+      }
       if (typeof f == "object" && prev === null && curr === null) {
         // Finished walking the tree on startup
         // Move all files into outDir

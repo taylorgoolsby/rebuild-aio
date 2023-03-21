@@ -7,3 +7,13 @@ app.get('/', function (req, res) {
 
 app.listen(3000)
 console.log('server started on port 3000')
+
+process.on('message', (m) => {
+  if (m === 'SIGRES') {
+    // process.exit()
+  }
+})
+
+process.on('SIGINT', () => {
+  // process.exit()
+})
