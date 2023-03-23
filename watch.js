@@ -134,6 +134,7 @@ ${c.yellow('Options:')}
       cleanupTimeout = setTimeout(() => {
         console.log(`${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`)
         child.kill()
+        process.exit()
       }, wait)
     } else {
       process.exit()
