@@ -235,7 +235,7 @@ ${c.yellow('Options:')}
     } else {
       makeChild()
     }
-  }, 5000)
+  }, 300)
 
   function getOutDirPath(filepath) {
     const split = filepath.split(/(?:\/|\\)/)
