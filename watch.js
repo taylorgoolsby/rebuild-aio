@@ -144,9 +144,8 @@ ${c.yellow('Options:')}
     if (child) {
       let cleanupTimeout
       const finalPortKilling = async () => {
-        if (debug) {
-          console.log(`${c.green('[monitor]')} ${c.grey(`exit`)}`)
-        }
+        // do not reference child in here because it might be null
+        // due to a different child.on('exit')
         if (cleanupTimeout) {
           clearTimeout(cleanupTimeout)
           cleanupTimeout = null
@@ -197,6 +196,12 @@ ${c.yellow('Options:')}
           ? ['pipe', process.stdout, process.stderr, 'ipc']
           : ['pipe', process.stdout, process.stderr],
     })
+    child.on('exit', () => {
+      if (debug) {
+        console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+      }
+      child = null
+    })
   }
 
   const restart = debounce(() => {
@@ -212,9 +217,6 @@ ${c.yellow('Options:')}
       // kill child before calling makeChild
       console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
       child.on('exit', () => {
-        if (debug) {
-          console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
-        }
         if (killTimeout) {
           clearTimeout(killTimeout)
           killTimeout = null
