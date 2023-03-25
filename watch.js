@@ -651,7 +651,6 @@ ${c.yellow('Options:')}
         },
       },
       async (f, curr, prev) => {
-        console.log('f', f)
         if (typeof f === 'string' && f.endsWith('~')) {
           // f is temp file
           return
