@@ -17,11 +17,11 @@ Usage:
     [--wait <number>] 
     
 Example:
-    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
+    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --transform 'src/web/node_modules/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
 
 Options:
     --watch -w        A glob. All watched files go to the output, but some are transformed along the way. At least one required.
-    --transform -t    Files matching this glob are passed through the transformer. Optional.
+    --transform -t    Files matching this glob are passed through the transformer. Multiple allowed.
     --using -u        The transformer. A JS file. Default: `default export async (inputPath, outputPath, contents) => {return contents}`. Optional.
     --output -o       The output directory. Required.
     --fork -f         The restart command. Optional. If omitted, then rebuild will exit after the first build.

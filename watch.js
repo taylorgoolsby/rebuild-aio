@@ -27,14 +27,14 @@ if (help) {
     [--wait <number>] 
     
 ${c.yellow('Example:')}
-    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
+    rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --transform 'src/web/node_modules/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
 
 ${c.yellow('Options:')}
     --watch -w        ${c.grey(
       'A glob. All watched files go to the output, but some are transformed along the way. At least one required.'
     )}
     --transform -t    ${c.grey(
-      'Files matching this glob are passed through the transformer. Optional.'
+      'Files matching this glob are passed through the transformer. Multiple allowed.'
     )}
     --using -u        ${c.grey(
       'The transformer. A JS file. Default: `default export async (inputPath, outputPath, contents) => {return contents}`. Optional.'
@@ -62,7 +62,8 @@ ${c.yellow('Options:')}
   const w = argv['w'] || argv['watch']
   const watchDirs = Array.isArray(w) ? w : [w].filter((a) => !!a)
   const outDir = argv['output'] || argv['o']
-  const transformGlob = argv['transform'] || argv['t']
+  const t = argv['transform'] || argv['t']
+  const transformGlobs = Array.isArray(t) ? t : [t].filter((a) => !!a)
   const transformer = argv['using'] || argv['u']
   const forkCommand = argv['fork'] || argv['f']
   const spawnCommand = argv['spawn'] || argv['s']
@@ -81,12 +82,6 @@ ${c.yellow('Options:')}
   if (!outDir && !Array.isArray(outDir)) {
     throw new Error(
       'A single --output (-o) option should be specified. -o is the output directory.'
-    )
-  }
-
-  if (Array.isArray(transformGlob)) {
-    throw new Error(
-      'Only one --transform (-t) option can be specified. -t is a glob specifying which files should be passed through the transformer.'
     )
   }
 
@@ -414,9 +409,7 @@ ${c.yellow('Options:')}
     const shortFilepath = path.relative(process.cwd(), filepath)
     const isDir = fs.lstatSync(originalPath).isDirectory()
     const isSymlink = fs.lstatSync(originalPath).isSymbolicLink()
-    const shouldTransform = transformGlob
-      ? micromatch.isMatch(f, transformGlob)
-      : false
+    const shouldTransform = !!transformGlobs.find(glob => micromatch.isMatch(f, glob))
     const shouldLog = debug || (!isNodeModule && !isDir)
     if (isDir || isSymlink) {
       if (!fs.existsSync(filepath)) {
