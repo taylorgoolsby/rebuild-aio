@@ -574,9 +574,11 @@ ${c.yellow('Options:')}
               resolve()
             }
           })
-          watch.unwatchTree(dir)
         }
       })
+      for (const dir of watchDirs) {
+        watch.unwatchTree(dir)
+      }
 
     } while (!deepEqual(prodDeps, nextProdDeps))
 
@@ -649,6 +651,7 @@ ${c.yellow('Options:')}
         },
       },
       async (f, curr, prev) => {
+        console.log('f', f)
         if (typeof f === 'string' && f.endsWith('~')) {
           // f is temp file
           return
