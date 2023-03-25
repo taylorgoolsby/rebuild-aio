@@ -10,6 +10,8 @@ import micromatch from 'micromatch'
 import { kill } from 'cross-port-killer'
 import escalade from 'escalade/sync'
 import debounce from 'lodash.debounce'
+import { deepEqual } from 'fast-equals';
+import { diff } from 'deep-object-diff';
 
 const argv = minimist(process.argv.slice(2))
 const help = argv['h'] || argv['help'] || Object.keys(argv).length === 1
@@ -65,8 +67,10 @@ ${c.yellow('Options:')}
   const t = argv['transform'] || argv['t']
   const transformGlobs = Array.isArray(t) ? t : [t].filter((a) => !!a)
   const transformer = argv['using'] || argv['u']
-  const forkCommand = argv['fork'] || argv['f']
-  const spawnCommand = argv['spawn'] || argv['s']
+  const f = argv['fork'] || argv['f']
+  const forkCommands = Array.isArray(f) ? f : [f].filter((a) => !!a)
+  const s = argv['spawn'] || argv['s']
+  const spawnCommands = Array.isArray(s) ? s : [s].filter((a) => !!a)
   const debug = argv['d'] || argv['debug']
   const k = argv['k'] || argv['kill']
   const killPorts = Array.isArray(k) ? k : [k].filter((a) => !!a)
@@ -91,15 +95,6 @@ ${c.yellow('Options:')}
     )
   }
 
-  if (forkCommand && spawnCommand) {
-    throw new Error(
-      'Only one of either --fork or --spawn can be specified, but not both.'
-    )
-  }
-
-  const command = forkCommand || spawnCommand
-  const spawner = (forkCommand && fork) || (spawnCommand && spawn)
-  const spawnerType = (forkCommand && 'fork') || (spawnCommand && 'spawn')
   const transform = transformer
     ? (await import(path.resolve(transformer))).default
     : async (filepath, outputPath, contents) => {
@@ -126,8 +121,7 @@ ${c.yellow('Options:')}
   fs.removeSync(outDir)
   fs.ensureDirSync(outDir)
 
-  let execTimeout
-  let child
+  let children = {} // key is command, value is {type: 'spawn' | 'fork', child}
 
   let sigintHandled = false
   process.on('SIGINT', () => {
@@ -136,101 +130,133 @@ ${c.yellow('Options:')}
     }
     sigintHandled = true
 
-    if (child) {
-      let cleanupTimeout
-      const finalPortKilling = async () => {
-        // do not reference child in here because it might be null
-        // due to a different child.on('exit')
-        if (cleanupTimeout) {
-          clearTimeout(cleanupTimeout)
-          cleanupTimeout = null
-        }
+    let cleanupTimeout
 
-        for (const port of killPorts) {
-          console.log(
-            `${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`
-          )
-          await kill(port)
-        }
-
-        console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
-        process.exit()
+    const finalPortKilling = async () => {
+      if (Object.keys(children).length !== 0) {
+        // all children should have exited by now.
+        return
       }
 
-      child.on('exit', finalPortKilling)
-      clean(child, spawnerType, 'SIGINT') // should send the SIGINT signal to the child, which causes it to exit.
-        .catch((err) => {
-          console.error(err)
-        })
+      if (cleanupTimeout) {
+        clearTimeout(cleanupTimeout)
+        cleanupTimeout = null
+      }
+
+      for (const port of killPorts) {
+        console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
+        await kill(port)
+      }
+
+      console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
+      process.exit()
+    }
+
+    if (Object.keys(children).length) {
+      for (const execution of Object.values(children)) {
+        execution.child.on('exit', finalPortKilling)
+        clean(execution.child, execution.type, 'SIGINT') // should send the SIGINT signal to the child, which causes it to exit.
+          .catch((err) => {
+            console.error(err)
+          })
+      }
 
       cleanupTimeout = setTimeout(() => {
         console.log(
           `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`
         )
-        child.kill()
-        process.exit()
+        for (const execution of Object.values(children)) {
+          execution.child.kill()
+        }
+        // finalPortKilling should be triggered before of exiting children.
       }, wait)
     } else {
-      process.exit()
+      finalPortKilling().catch((err) => {
+        console.error(err)
+      })
     }
   })
 
-  const makeChild = () => {
-    if (spawner === spawn) {
-      console.log(
-        `${c.green('[monitor]')} ${c.yellow('spawn')} ${c.grey(command)}`
-      )
-    } else if (spawner === fork) {
+  const makeChildren = () => {
+    for (const command of forkCommands) {
       console.log(
         `${c.green('[monitor]')} ${c.yellow('fork')} ${c.grey(command)}`
       )
-    }
-    child = spawner(command.split(' ')[0], command.split(' ').slice(1), {
-      stdio:
-        spawner === fork
-          ? ['pipe', process.stdout, process.stderr, 'ipc']
-          : ['pipe', process.stdout, process.stderr],
-    })
-    child.on('exit', () => {
-      if (debug) {
-        console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+      const child = fork(command.split(' ')[0], command.split(' ').slice(1), {
+        stdio: ['pipe', process.stdout, process.stderr, 'ipc'],
+      })
+      child.on('exit', () => {
+        if (debug) {
+          console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+        }
+        delete children[command]
+      })
+      children[command] = {
+        type: 'fork',
+        child,
       }
-      child = null
-    })
+    }
+
+    for (const command of spawnCommands) {
+      console.log(
+        `${c.green('[monitor]')} ${c.yellow('spawn')} ${c.grey(command)}`
+      )
+      const child = spawn(command.split(' ')[0], command.split(' ').slice(1), {
+        stdio: ['pipe', process.stdout, process.stderr],
+      })
+      child.on('exit', () => {
+        if (debug) {
+          console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+        }
+        delete children[command]
+      })
+      children[command] = {
+        type: 'spawn',
+        child,
+      }
+    }
   }
 
   const restart = debounce(() => {
-    if (!command) {
+    if (forkCommands.length === 0 && spawnCommands.length === 0) {
       return
     }
-    if (child) {
+    if (Object.keys(children).length) {
       let killTimeout
       if (killTimeout) {
         clearTimeout(killTimeout)
         killTimeout = null
       }
-      // kill child before calling makeChild
+      // kill child before calling makeChildren
       console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
-      child.on('exit', () => {
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
-        }
-        child = null
-        makeChild()
-      })
-      clean(child, spawnerType, 'SIGRES').catch((err) => {
-        console.error(err)
-      })
+      for (const execution of Object.values(children)) {
+        execution.child.on('exit', () => {
+          if (Object.keys(children).length !== 0) {
+            // all children should have exited by now.
+            return
+          }
+
+          if (killTimeout) {
+            clearTimeout(killTimeout)
+            killTimeout = null
+          }
+          makeChildren()
+        })
+        clean(execution.child, execution.type, 'SIGRES').catch((err) => {
+          console.error(err)
+        })
+      }
       killTimeout = setTimeout(() => {
         console.log(
           `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`
         )
         // when the program restarts, if the forked process does not exit, then kill it after `wait` time.
-        child.kill()
+        for (const execution of Object.values(children)) {
+          execution.child.kill()
+        }
       }, wait)
     } else {
-      makeChild()
+      makeChildren()
     }
   }, 300)
 
@@ -409,7 +435,9 @@ ${c.yellow('Options:')}
     const shortFilepath = path.relative(process.cwd(), filepath)
     const isDir = fs.lstatSync(originalPath).isDirectory()
     const isSymlink = fs.lstatSync(originalPath).isSymbolicLink()
-    const shouldTransform = !!transformGlobs.find(glob => micromatch.isMatch(f, glob))
+    const shouldTransform = !!transformGlobs.find((glob) =>
+      micromatch.isMatch(f, glob)
+    )
     const shouldLog = debug || (!isNodeModule && !isDir)
     if (isDir || isSymlink) {
       if (!fs.existsSync(filepath)) {
@@ -448,9 +476,120 @@ ${c.yellow('Options:')}
     }
   }
 
+  // When it finds the top-level package.json, it reads the dependencies field,
+  // adding entries to the prod list which are paths to the dir containing the package.json.
+  //
+  // Any time a package.json inside node_modules is found, it checks the prod list for a matching path.
+  // If the path matches, it is a prod dep, and all of its dependencies are added to the prod list.
+  // These dependencies may or may not be in the flat first-level of node_modules.
+  // So a check is performed. It looks for the package.json in the local-level node_modules.
+  // This mirrors how node's require resolution algorithm works.
+  // If no module is found in the local-level, then it goes up to the next node_modules level and checks there.
+  // It continues these checks until it reaches the first-level node_modules.
+  // When it finds an existing path, then it adds that path to the prod list.
+  //
+  // This loop continues running until the prod list stops changing.
+  async function getProdDeps() {
+    let prodDeps = {}
+    let nextProdDeps = {} // key is dir path, value is version
+    do {
+      prodDeps = {...nextProdDeps}
+
+      await new Promise((resolve) => {
+        for (const dir of watchDirs) {
+          watch.watchTree(dir, {
+            ignoreDotFiles: true,
+          }, async (f) => {
+            if (typeof f === 'object') {
+              for (const file of Object.keys(f)) {
+                const isNodeModules = file.includes('node_modules')
+                const isPackageJson = file.endsWith('package.json')
+                const nodeModulesCount = file.match(/node_modules/g)?.length || 0
+                const isSymLinkDep = nodeModulesCount === 1 && fs.lstatSync(file).isSymbolicLink()
+                if (isPackageJson && !isNodeModules) {
+                  // top-level package.json
+                  const pkg = fs.readJsonSync(file)
+                  for (const moduleName of Object.keys(pkg.dependencies || {})) {
+                    const topLevelDir = path.resolve(file, '..')
+                    const packagePath = path.resolve(topLevelDir, 'node_modules', moduleName, 'package.json')
+                    nextProdDeps[packagePath] = (pkg.dependencies || {})[moduleName]
+                  }
+
+                  // Also include top-level devDependencies since these may be used
+                  // for custom build scripts:
+                  // for (const moduleName of Object.keys(pkg.devDependencies || {})) {
+                  //   const topLevelDir = path.resolve(file, '..')
+                  //   const packagePath = path.resolve(topLevelDir, 'node_modules', moduleName, 'package.json')
+                  //   nextProdDeps[packagePath] = (pkg.devDependencies || {})[moduleName]
+                  // }
+                } else if (isNodeModules && !isPackageJson) {
+                  if (isSymLinkDep) {
+                    // Sometimes a dev needs to use npm link pkg to work on a fork of a package locally.
+                    // In this case, the dep does not appear in the top-level package.json,
+                    // but it appears in the first-level node_modules as a symlink.
+                    const packagePath = path.resolve(file, 'package.json')
+                    const pkg = fs.readJsonSync(packagePath)
+                    nextProdDeps[packagePath] = pkg.name
+                  }
+                } else if (isNodeModules && isPackageJson) {
+                  // dependency's package.json
+                  const pkg = fs.readJsonSync(file)
+                  const currentFolderPath = path.resolve(file, '..') // take package.json off the end
+
+                  if (nextProdDeps[path.resolve(file)]) {
+                    // This dep is in the prod list, so add its deps to the list also.
+                    for (const moduleName of Object.keys(pkg.dependencies || {})) {
+                      // Look for this dep's dep starting with the local node_modules.
+                      let startingPath = path.resolve(currentFolderPath, 'node_modules')
+                      if (!fs.existsSync(startingPath)) {
+                        startingPath = path.resolve(currentFolderPath)
+                      }
+                      const packagePath = escalade(startingPath, (dir, names) => {
+                        // root/node_modules/pkgA/node_modules/pkgB
+                        // root/node_modules/pkgA/node_modules
+                        // root/node_modules/pkgA
+                        // root/node_modules
+                        // root
+
+                        if (!dir.includes('node_modules')) {
+                          // gone too far, stop.
+                          return null
+                        }
+
+                        if (dir.endsWith(`node_modules`)) {
+                          // within any level of node_modules,
+                          // check if this module is in the folder.
+                          const packagePath = path.resolve(dir, moduleName, 'package.json')
+                          if (fs.existsSync(packagePath)) {
+                            // The module has been found.
+                            return packagePath
+                          }
+                        }
+                      })
+                      nextProdDeps[packagePath] = (pkg.dependencies || {})[moduleName]
+                    }
+                  }
+                }
+              }
+              resolve()
+            }
+          })
+          watch.unwatchTree(dir)
+        }
+      })
+
+    } while (!deepEqual(prodDeps, nextProdDeps))
+
+    return nextProdDeps
+  }
+
+  const prodDeps = await getProdDeps()
+
+  // console.log('prodDeps', prodDeps)
+
   for (const dir of watchDirs) {
     // Tell it what to watch
-    if (command) {
+    if (forkCommands.length || spawnCommands.length) {
       console.log(
         `${c.green('[monitor]')} ${c.grey(`${c.yellow('watching')} ${dir}`)}`
       )
@@ -466,18 +605,39 @@ ${c.yellow('Options:')}
       {
         interval: 0.1,
         filter: (file, stat) => {
+          // file = path.resolve(file)
           const isNodeModule = file.includes('node_modules')
           if (isNodeModule) {
-            // if (file.includes('graphql-directive-private')) {
-            //   return false
-            // }
-            const isProdDep = isProductionDependency(file)
-            // if (file.includes('src/backend/node_modules/@graphql-tools/utils')) {
-            //   console.log('file', file)
-            //   console.log('isProdDep', isProdDep)
-            // }
-            if (!isProdDep) {
-              return false
+            // The file might be a path like root/node_modules/pkgA/src/file.js
+            // So escalade is used to go up to root/node_modules/pkgA,
+            // which is the folder containing the nearest package.json
+            const packagePath = escalade(file, (dir, names) => {
+              if (!dir.includes('node_modules')) {
+                // finding a package.json after this point is not valid.
+                return null
+              }
+
+              if (names.includes('package.json')) {
+                const packagePath = path.resolve(dir, 'package.json')
+                const pkg = fs.readJsonSync(packagePath)
+                if (pkg.name && pkg.version) {
+                  // sometimes, a bare package.json might exist in order
+                  // that file within a folder are treated with a different type.
+                  // For example, it would contain, {"type": "module"}
+                  // These kinds of package.jsons are not considered.
+                  // Only package.jsons with a name and version are considered.
+                  return packagePath
+                }
+              }
+            })
+            if (packagePath) {
+              // if moduleFolder could not be found,
+              // it is likely because escalade started on a path like root/node_modules/@org or root/node_modules.
+              const isProdDep = prodDeps[packagePath]
+              if (!isProdDep) {
+                // console.log('moduleFolder', packagePath)
+                return false
+              }
             }
           } else {
             const isBin = file.includes('.bin')
@@ -497,12 +657,16 @@ ${c.yellow('Options:')}
           // Finished walking the tree on startup
           // Move all files into outDir
           for (const key of Object.keys(f)) {
-            // console.log('key', key)
+            if (debug) {
+              console.log(
+                `${c.green('[monitor]')} ${c.grey(`found ${key}`)}`
+              )
+            }
             if (sigintHandled) break
             await pass(key)
             restart()
           }
-          if (!command) {
+          if (!(forkCommands.length || spawnCommands.length)) {
             // No command, so exit after building instead of watching.
             console.log(
               `${c.green('[monitor]')} ${c.grey(
