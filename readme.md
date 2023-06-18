@@ -14,7 +14,8 @@ Usage:
     [--fork <string>] \
     [--spawn <string>] \ 
     [--kill <number>] \
-    [--wait <number>] 
+    [--wait <number>] \
+    [--debug]
     
 Example:
     rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --transform 'src/web/node_modules/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
@@ -166,3 +167,42 @@ async (child, spawnerType, signal) => {
    }
 }
 ```
+
+## Pause and Resume Forking
+
+If you have multiple `--fork` commands, by default, they will be forked in order with minimal delay between them. This can be problematic if one child process depends on another to have completed startup.
+
+A service can tell the monitor to pause and resume forking. This is done using these IPC messages:
+
+* `process.send({pauseForking: true})` - To be placed at the beginning of your startup script.
+* `process.send({resumeForking: true})` - To be placed at the end of your startup script.
+
+Here is an example:
+
+```js
+process.send({
+  pauseForking: true // Tell rebuild-aio to pause forking.
+})
+
+import {start, stop} from './localMysqlServer.js'
+const port = 3306
+
+process.on('message', async (m) => {
+  if (m === 'SIGRES') {
+    await stop(port)
+    process.exit() // must exit eventually.
+  }
+})
+
+await start(port)
+
+process.send({
+  resumeForking: true // Tell rebuild-aio to resume forking after mysql has started.
+})
+
+```
+
+## Useful Globs
+
+* `projects/*/!(node_modules)/**/*.{js,mjs}` - If you have a monorepo where all subprojects are siblings in a folder, you can select all files which are not in any subproject's `node_modules` using this glob.
+* `projects/*/{!(node_modules),node_modules/common}/**/*.{js,mjs}` - If you have a `common` project in your monorepo which is included in your other projects using `"common": "file:../common"`, then `common` will be placed in the `node_modules` folder of your other projects, so to include it in transforms, use this glob.

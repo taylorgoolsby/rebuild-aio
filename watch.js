@@ -11,7 +11,7 @@ import { kill } from 'cross-port-killer'
 import escalade from 'escalade/sync'
 import debounce from 'lodash.debounce'
 import { deepEqual } from 'fast-equals';
-import { diff } from 'deep-object-diff';
+import delay from 'delay'
 
 const argv = minimist(process.argv.slice(2))
 const help = argv['h'] || argv['help'] || Object.keys(argv).length === 1
@@ -26,7 +26,8 @@ if (help) {
     [--fork <string>] \\
     [--spawn <string>] \\ 
     [--kill <number>] \\
-    [--wait <number>] 
+    [--wait <number>] \\
+    [--debug]
     
 ${c.yellow('Example:')}
     rebuild --watch src --transform 'src/*/src/**/*.{js,mjs}' --transform 'src/web/node_modules/**/*.{js,mjs}' --using transformer.js --output build --fork server.js -k 3000 --wait 500
@@ -177,7 +178,7 @@ ${c.yellow('Options:')}
     }
   })
 
-  const makeChildren = () => {
+  const makeChildren = async () => {
     for (const command of forkCommands) {
       console.log(
         `${c.green('[monitor]')} ${c.yellow('fork')} ${c.grey(command)}`
@@ -185,9 +186,51 @@ ${c.yellow('Options:')}
       const child = fork(command.split(' ')[0], command.split(' ').slice(1), {
         stdio: ['pipe', process.stdout, process.stderr, 'ipc'],
       })
-      child.on('exit', () => {
-        if (debug) {
-          console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+      const spawnPromise = new Promise((resolve, reject) => {
+        child.on('spawn', () => {
+          resolve()
+        })
+        child.on('error', (err) => {
+          reject(err)
+        })
+      })
+      const continuePromise = new Promise(async (resolve, reject) => {
+        let wait = false
+        let pauseForkingTimeout = null
+        child.on('message', (message) => {
+          if (typeof message === 'object') {
+            if (message.pauseForking) {
+              console.log(`${c.green('[monitor]')} ${c.yellow(`pauseForking`)} ${c.grey(command)}`)
+              wait = true
+              pauseForkingTimeout = setTimeout(() => {
+                console.log(`${c.green('[monitor]')} ${c.red(`pauseForking timeout`)} ${c.grey(command)}`)
+                wait = false
+              }, 30000)
+            } else if (message.resumeForking) {
+              if (pauseForkingTimeout) clearTimeout(pauseForkingTimeout)
+              pauseForkingTimeout = null
+              console.log(`${c.green('[monitor]')} ${c.yellow(`resumeForking`)} ${c.grey(command)}`)
+              wait = false
+            }
+          }
+        })
+        try {
+          await spawnPromise
+        } catch (err) {
+          reject(err)
+        }
+        await delay(500) // child has 500ms after spawning to tell parent to pause.
+        while (wait) {
+          await delay(500)
+        }
+        resolve()
+      })
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          crashDetected = true
+          console.log(`${c.green('[monitor]')} ${c.red(`crash`)} ${c.grey(command)}`)
+        } else {
+          console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
         }
         delete children[command]
       })
@@ -195,6 +238,7 @@ ${c.yellow('Options:')}
         type: 'fork',
         child,
       }
+      await continuePromise
     }
 
     for (const command of spawnCommands) {
@@ -204,9 +248,12 @@ ${c.yellow('Options:')}
       const child = spawn(command.split(' ')[0], command.split(' ').slice(1), {
         stdio: ['pipe', process.stdout, process.stderr],
       })
-      child.on('exit', () => {
-        if (debug) {
-          console.log(`${c.green('[monitor]')} ${c.grey('exit')}`)
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          crashDetected = true
+          console.log(`${c.green('[monitor]')} ${c.red('crash')} ${c.grey(command)}`)
+        } else {
+          console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
         }
         delete children[command]
       })
@@ -217,6 +264,7 @@ ${c.yellow('Options:')}
     }
   }
 
+  let crashDetected = false
   const restart = debounce(() => {
     if (forkCommands.length === 0 && spawnCommands.length === 0) {
       return
@@ -240,7 +288,9 @@ ${c.yellow('Options:')}
             clearTimeout(killTimeout)
             killTimeout = null
           }
-          makeChildren()
+          makeChildren().catch(err => {
+            console.error(err)
+          })
         })
         clean(execution.child, execution.type, 'SIGRES').catch((err) => {
           console.error(err)
@@ -256,8 +306,14 @@ ${c.yellow('Options:')}
         }
       }, wait)
     } else {
-      makeChildren()
+      if (crashDetected) {
+        console.log(`${c.green('[monitor]')} ${c.yellow('restarting from crash...')}`)
+      }
+      makeChildren().catch(err => {
+        console.error(err)
+      })
     }
+    crashDetected = false
   }, 300)
 
   function getOutDirPath(filepath) {
@@ -501,6 +557,8 @@ ${c.yellow('Options:')}
             ignoreDotFiles: true,
           }, async (f) => {
             if (typeof f === 'object') {
+              // After watch finds all files under dir, it will call this callback with f as an object where
+              // keys are the file/directory names and the values are the current stat objects
               for (const file of Object.keys(f)) {
                 const isNodeModules = file.includes('node_modules')
                 const isPackageJson = file.endsWith('package.json')
@@ -533,7 +591,24 @@ ${c.yellow('Options:')}
                   }
                 } else if (isNodeModules && isPackageJson) {
                   // dependency's package.json
-                  const pkg = fs.readJsonSync(file)
+                  let pkg
+                  try {
+                    pkg = fs.readJsonSync(file)
+                  } catch (err) {
+                    if (debug) {
+                      console.log(
+                        `${c.green('[monitor]')} ${c.grey(`malformed json ${file}`)}`
+                      )
+                    }
+                  }
+                  if (!pkg) {
+                    console.log(
+                      `${c.green('[monitor]')} ${c.grey(
+                        `${c.yellow('excluded')} ${file}`
+                      )}`
+                    )
+                    continue
+                  }
                   const currentFolderPath = path.resolve(file, '..') // take package.json off the end
 
                   if (nextProdDeps[path.resolve(file)]) {
