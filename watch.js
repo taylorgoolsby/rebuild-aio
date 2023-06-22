@@ -10,7 +10,7 @@ import micromatch from 'micromatch'
 import { kill } from 'cross-port-killer'
 import escalade from 'escalade/sync'
 import debounce from 'lodash.debounce'
-import { deepEqual } from 'fast-equals';
+import { deepEqual } from 'fast-equals'
 import delay from 'delay'
 
 const argv = minimist(process.argv.slice(2))
@@ -200,16 +200,28 @@ ${c.yellow('Options:')}
         child.on('message', (message) => {
           if (typeof message === 'object') {
             if (message.pauseForking) {
-              console.log(`${c.green('[monitor]')} ${c.yellow(`pauseForking`)} ${c.grey(command)}`)
+              console.log(
+                `${c.green('[monitor]')} ${c.yellow(`pauseForking`)} ${c.grey(
+                  command
+                )}`
+              )
               wait = true
               pauseForkingTimeout = setTimeout(() => {
-                console.log(`${c.green('[monitor]')} ${c.red(`pauseForking timeout`)} ${c.grey(command)}`)
+                console.log(
+                  `${c.green('[monitor]')} ${c.red(
+                    `pauseForking timeout`
+                  )} ${c.grey(command)}`
+                )
                 wait = false
               }, 30000)
             } else if (message.resumeForking) {
               if (pauseForkingTimeout) clearTimeout(pauseForkingTimeout)
               pauseForkingTimeout = null
-              console.log(`${c.green('[monitor]')} ${c.yellow(`resumeForking`)} ${c.grey(command)}`)
+              console.log(
+                `${c.green('[monitor]')} ${c.yellow(`resumeForking`)} ${c.grey(
+                  command
+                )}`
+              )
               wait = false
             }
           }
@@ -228,7 +240,9 @@ ${c.yellow('Options:')}
       child.on('exit', (code) => {
         if (code !== 0) {
           crashDetected = true
-          console.log(`${c.green('[monitor]')} ${c.red(`crash`)} ${c.grey(command)}`)
+          console.log(
+            `${c.green('[monitor]')} ${c.red(`crash`)} ${c.grey(command)}`
+          )
         } else {
           console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
         }
@@ -251,7 +265,9 @@ ${c.yellow('Options:')}
       child.on('exit', (code) => {
         if (code !== 0) {
           crashDetected = true
-          console.log(`${c.green('[monitor]')} ${c.red('crash')} ${c.grey(command)}`)
+          console.log(
+            `${c.green('[monitor]')} ${c.red('crash')} ${c.grey(command)}`
+          )
         } else {
           console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
         }
@@ -288,7 +304,7 @@ ${c.yellow('Options:')}
             clearTimeout(killTimeout)
             killTimeout = null
           }
-          makeChildren().catch(err => {
+          makeChildren().catch((err) => {
             console.error(err)
           })
         })
@@ -307,9 +323,11 @@ ${c.yellow('Options:')}
       }, wait)
     } else {
       if (crashDetected) {
-        console.log(`${c.green('[monitor]')} ${c.yellow('restarting from crash...')}`)
+        console.log(
+          `${c.green('[monitor]')} ${c.yellow('restarting from crash...')}`
+        )
       }
-      makeChildren().catch(err => {
+      makeChildren().catch((err) => {
         console.error(err)
       })
     }
@@ -319,167 +337,6 @@ ${c.yellow('Options:')}
   function getOutDirPath(filepath) {
     const split = filepath.split(/(?:\/|\\)/)
     return path.resolve(outDir, split.slice(1).join('/'))
-  }
-
-  /*
-  A file is found in node_modules.
-  It might be a dependency of a dependency, e.g. /node_modules/package/node_modules.
-  This functions tells whether or not this file is in a node_module which is a
-  production dependency, which means it is a file needed for production.
-  This means that it appears in a chain of dependencies, not devDependencies.
-
-  However, this chain can possible stop before reaching the top level of the project
-  in a monorepo structure.
-
-  In both cases, monorepo or not, the concept of "top-level" for a sub-project can
-  be defined as when the path does not contain "node_modules".
-
-  Sometimes a dependency is a symlink because of `npm link`.
-  These do not appear in the package.json.
-  If a symlink is encountered, it is considered to be part of prod.
-  * */
-  function isProductionDependency(input) {
-    // All node_modules used in productions are installed flat,
-    // so any paths which have a second level of node_modules are not allowed.
-
-    const nodeModulesCount = input.match(/node_modules/g)?.length || 0
-    if (nodeModulesCount > 1) {
-      return false
-    }
-    return true
-
-    // input = path.normalize(input).replaceAll('\\', '/')
-    // // console.log('input', input)
-    // let nodeModulesCount = 0
-    // let firstEncounter = false
-    // let secondEncounter = false
-    // let moduleName
-    // let notDep = false
-    // escalade(input, (dir, names) => {
-    //   if (dir.includes('src/backend/node_modules/@graphql-tools/utils') || moduleName === '@graphql-tools/utils') {
-    //     console.log('input', input)
-    //     console.log('dir', dir)
-    //     console.log('names', names)
-    //   }
-    //
-    //   const topLevel = !dir.includes('node_modules')
-    //   const firstLevel = dir.match(/node_modules/g)?.length === 1
-    //   const topLevelReached = topLevel && names.includes('node_modules')
-    //   const aboveTopLevel = topLevel && !topLevelReached
-    //   if (aboveTopLevel) {
-    //     // If the dir does not contain node_modules,
-    //     // then the top-level has been reached,
-    //     // if node_modules is in names.
-    //     return '_'
-    //   }
-    //   if (names.includes('package.json')) {
-    //     if (!firstEncounter) {
-    //       const pkgPath = path.resolve(dir, 'package.json')
-    //       const pkg = fs.readJsonSync(pkgPath)
-    //       moduleName = pkg.name
-    //       if (moduleName) {
-    //         firstEncounter = true
-    //       }
-    //
-    //       if (dir.includes('src/backend/node_modules/@graphql-tools/utils') || moduleName === '@graphql-tools/utils') {
-    //         console.log('first')
-    //         console.log('pkg', pkg)
-    //       }
-    //
-    //     } else {
-    //       const pkgPath = path.resolve(dir, 'package.json')
-    //       const pkg = fs.readJsonSync(pkgPath)
-    //       if (pkg.name) {
-    //         secondEncounter = true
-    //       }
-    //       const isDep =
-    //         !!pkg.dependencies && moduleName && pkg.dependencies[moduleName]
-    //
-    //       if (dir.includes('src/backend/node_modules/@graphql-tools/utils') || moduleName === '@graphql-tools/utils') {
-    //         console.log('pkg', pkg)
-    //         console.log('isDep', isDep)
-    //       }
-    //
-    //       if (!isDep) {
-    //         notDep = true
-    //         return '_' // dummy to break out.
-    //       }
-    //       moduleName = pkg.name // ready for next encounter
-    //     }
-    //   } else if (dir.endsWith('node_modules')) {
-    //     // dir is one level above node_modules
-    //     nodeModulesCount++
-    //   } else if (dir === process.cwd()) {
-    //     // done
-    //     return '_'
-    //   }
-    //
-    //   if (dir.includes('src/backend/node_modules/@graphql-tools/utils') || moduleName === '@graphql-tools/utils') {
-    //     console.log('asdas')
-    //   }
-    //
-    //   const isSymLink = fs.lstatSync(dir).isSymbolicLink()
-    //   if (isSymLink && firstLevel) {
-    //     // If a symlink is found in node_modules
-    //     // then it is considered to be prod
-    //     // if the previous checks in lower tree levels
-    //     // were found to also be prod.
-    //     if (dir.includes('src/backend/node_modules/@graphql-tools/utils') || moduleName === '@graphql-tools/utils') {
-    //       console.log('isSymLink')
-    //     }
-    //     return '_' // dummy to break out.
-    //   }
-    // })
-    // if (notDep) {
-    //   // Unable to climb tree without encountering non-dep.
-    //   return false
-    // } else {
-    //   return true
-    // }
-    // if (nodeModulesCount === 0) {
-    //   // top-level file
-    //   return true
-    // }
-    // if (nodeModulesCount === 1 && (/node_modules(?=(?:\/[^./]+)?(?:\/[^./]+)?$)/gm).test(input)) {
-    //   // this is a path which ends with, examples:
-    //   // asdasd/node_modules/@asd/as
-    //   // node_modules/as
-    //   // node_modules
-    //   // but not:
-    //   // node_modules/@asd/as/asd
-    //   // node_modules/@asd/asd.asd
-    //   // node_modules/file.asd
-    //   // node_modules/.bin
-    //   return true
-    // }
-    // if (firstEncounter && !secondEncounter) {
-    //   // top-level package.json, so it is part of production.
-    //   return true
-    // }
-  }
-
-  async function getParentPackageJson(input) {
-    let firstEncounter = false
-    const pkgPath = await escalade(input, (dir, names) => {
-      if (names.includes('package.json')) {
-        if (!firstEncounter) {
-          firstEncounter = true
-        } else {
-          return 'package.json'
-        }
-      }
-    })
-    return fs.readJsonSync(pkgPath)
-  }
-
-  async function getModuleName(input) {
-    const pkgPath = await escalade(input, (dir, names) => {
-      if (names.includes('package.json')) {
-        return 'package.json'
-      }
-    })
-    const pkg = fs.readJsonSync(pkgPath)
-    return pkg.name
   }
 
   async function pass(f) {
@@ -495,6 +352,7 @@ ${c.yellow('Options:')}
       micromatch.isMatch(f, glob)
     )
     const shouldLog = debug || (!isNodeModule && !isDir)
+
     if (isDir || isSymlink) {
       if (!fs.existsSync(filepath)) {
         if (shouldLog) {
@@ -532,132 +390,124 @@ ${c.yellow('Options:')}
     }
   }
 
-  // When it finds the top-level package.json, it reads the dependencies field,
-  // adding entries to the prod list which are paths to the dir containing the package.json.
-  //
-  // Any time a package.json inside node_modules is found, it checks the prod list for a matching path.
-  // If the path matches, it is a prod dep, and all of its dependencies are added to the prod list.
-  // These dependencies may or may not be in the flat first-level of node_modules.
-  // So a check is performed. It looks for the package.json in the local-level node_modules.
-  // This mirrors how node's require resolution algorithm works.
-  // If no module is found in the local-level, then it goes up to the next node_modules level and checks there.
-  // It continues these checks until it reaches the first-level node_modules.
-  // When it finds an existing path, then it adds that path to the prod list.
-  //
-  // This loop continues running until the prod list stops changing.
   async function getProdDeps() {
-    let prodDeps = {}
-    let nextProdDeps = {} // key is dir path, value is version
-    do {
-      prodDeps = {...nextProdDeps}
+    //  each subproject in the monorepo should keep track of its own prod deps.
+    //  Make watch exclude node_modules so that it doesn't iterate over files in there.
+    //  Also make watch only find package.json files.
+    //  Now watch fill only find top-level package.json files.
+    //  For each top-level package.json found,
+    //  create prodDeps[topLevelFolderPath] = {[depFolderPath: string]: boolean}
+    //  For each key of prodDeps, aka each topLevelFolderPath,
+    //  go into its node_modules folder, and for each depFolderPath,
+    //  get the package.json for that dep.
+    //  Add its deps to the current prodDeps[topLevelFolderPath] object.
+    //  Each new dep that is added is also recorded in a temp array
+    //  if it didn't already exist in the current prodDeps[topLevelFolderPath] object.
+    //  Repeat the loop for each dep in this array,
+    //  also adding its deps to the current prodDeps[topLevelFolderPath] object.
+    //  At the end of the loop, if the temp array is empty, there is nothing to follow up on,
+    //  So all prod deps for this top-level project have been accounted for, and we can move
+    //  on to the next top-level project.
 
-      await new Promise((resolve) => {
-        for (const dir of watchDirs) {
-          watch.watchTree(dir, {
+    const prodDeps = {}
+    await new Promise((resolve, reject) => {
+      for (const dir of watchDirs) {
+        watch.watchTree(
+          dir,
+          {
             ignoreDotFiles: true,
-          }, async (f) => {
+            filter: (file, stat) => {
+              const isNodeModule = file.includes('node_modules')
+              if (isNodeModule) return false
+              return true
+            },
+          },
+          async (f) => {
             if (typeof f === 'object') {
-              // After watch finds all files under dir, it will call this callback with f as an object where
-              // keys are the file/directory names and the values are the current stat objects
-              for (const file of Object.keys(f)) {
-                const isNodeModules = file.includes('node_modules')
-                const isPackageJson = file.endsWith('package.json')
-                const nodeModulesCount = file.match(/node_modules/g)?.length || 0
-                const isSymLinkDep = nodeModulesCount === 1 && fs.lstatSync(file).isSymbolicLink()
-                if (isPackageJson && !isNodeModules) {
-                  // top-level package.json
-                  const pkg = fs.readJsonSync(file)
-                  for (const moduleName of Object.keys(pkg.dependencies || {})) {
-                    const topLevelDir = path.resolve(file, '..')
-                    const packagePath = path.resolve(topLevelDir, 'node_modules', moduleName, 'package.json')
-                    nextProdDeps[packagePath] = (pkg.dependencies || {})[moduleName]
-                  }
+              for (const key of Object.keys(f)) {
+                const isPackageJson = key.endsWith('package.json')
+                if (!isPackageJson) continue
 
-                  // Also include top-level devDependencies since these may be used
-                  // for custom build scripts:
-                  // for (const moduleName of Object.keys(pkg.devDependencies || {})) {
-                  //   const topLevelDir = path.resolve(file, '..')
-                  //   const packagePath = path.resolve(topLevelDir, 'node_modules', moduleName, 'package.json')
-                  //   nextProdDeps[packagePath] = (pkg.devDependencies || {})[moduleName]
-                  // }
-                } else if (isNodeModules && !isPackageJson) {
-                  if (isSymLinkDep) {
-                    // Sometimes a dev needs to use npm link pkg to work on a fork of a package locally.
-                    // In this case, the dep does not appear in the top-level package.json,
-                    // but it appears in the first-level node_modules as a symlink.
-                    const packagePath = path.resolve(file, 'package.json')
-                    const pkg = fs.readJsonSync(packagePath)
-                    nextProdDeps[packagePath] = pkg.name
-                  }
-                } else if (isNodeModules && isPackageJson) {
-                  // dependency's package.json
-                  let pkg
-                  try {
-                    pkg = fs.readJsonSync(file)
-                  } catch (err) {
-                    if (debug) {
-                      console.log(
-                        `${c.green('[monitor]')} ${c.grey(`malformed json ${file}`)}`
-                      )
-                    }
-                  }
-                  if (!pkg) {
-                    console.log(
-                      `${c.green('[monitor]')} ${c.grey(
-                        `${c.yellow('excluded')} ${file}`
-                      )}`
-                    )
-                    continue
-                  }
-                  const currentFolderPath = path.resolve(file, '..') // take package.json off the end
+                const topLevelFolderPath = path.dirname(key)
+                prodDeps[topLevelFolderPath] = {}
 
-                  if (nextProdDeps[path.resolve(file)]) {
-                    // This dep is in the prod list, so add its deps to the list also.
-                    for (const moduleName of Object.keys(pkg.dependencies || {})) {
-                      // Look for this dep's dep starting with the local node_modules.
-                      let startingPath = path.resolve(currentFolderPath, 'node_modules')
-                      if (!fs.existsSync(startingPath)) {
-                        startingPath = path.resolve(currentFolderPath)
+                let newlyAdded = {}
+
+                const topLevelPackage = fs.readJsonSync(key)
+                for (const depName of Object.keys(
+                  topLevelPackage.dependencies || {}
+                )) {
+                  const depFolderPath = `${topLevelFolderPath}/node_modules/${depName}`
+                  newlyAdded[depFolderPath] = true
+                  prodDeps[topLevelFolderPath][depFolderPath] = true
+                }
+
+                let nextNewlyAdded
+                while (Object.keys(newlyAdded).length) {
+                  nextNewlyAdded = {}
+                  for (const depFolderPath of Object.keys(newlyAdded)) {
+                    // Add the deps of newlyAdded deps.
+                    const depPackage = fs.readJsonSync(`${depFolderPath}/package.json`)
+                    for (const depName of Object.keys(
+                      depPackage.dependencies || {}
+                    )) {
+                      const depFolderPath = `${topLevelFolderPath}/node_modules/${depName}`
+                      if (!prodDeps[topLevelFolderPath][depFolderPath]) {
+                        nextNewlyAdded[depFolderPath] = true
+                        prodDeps[topLevelFolderPath][depFolderPath] = true
                       }
-                      const packagePath = escalade(startingPath, (dir, names) => {
-                        // root/node_modules/pkgA/node_modules/pkgB
-                        // root/node_modules/pkgA/node_modules
-                        // root/node_modules/pkgA
-                        // root/node_modules
-                        // root
-
-                        if (!dir.includes('node_modules')) {
-                          // gone too far, stop.
-                          return null
-                        }
-
-                        if (dir.endsWith(`node_modules`)) {
-                          // within any level of node_modules,
-                          // check if this module is in the folder.
-                          const packagePath = path.resolve(dir, moduleName, 'package.json')
-                          if (fs.existsSync(packagePath)) {
-                            // The module has been found.
-                            return packagePath
-                          }
-                        }
-                      })
-                      nextProdDeps[packagePath] = (pkg.dependencies || {})[moduleName]
                     }
                   }
+                  newlyAdded = nextNewlyAdded
                 }
               }
-              resolve()
             }
-          })
-        }
-      })
-      for (const dir of watchDirs) {
-        watch.unwatchTree(dir)
+            resolve()
+          }
+        )
       }
+    })
 
-    } while (!deepEqual(prodDeps, nextProdDeps))
+    // Symlinked deps via npm link are handled separately.
+    // To catch these, go into a top-level project's node_modules, and look for
+    // folders which are symlinked.
+    // When you find a symlinked folder, add it to the prod deps.
+    for (const topLevelFolderPath of Object.keys(prodDeps)) {
+      // todo: Do symlinks for orgs need to be considered?
+      const folders = fs.readdirSync(`${topLevelFolderPath}/node_modules`)
+      for (const folder of folders) {
+        if (folder.startsWith('.')) continue
+        const folderPath = `${topLevelFolderPath}/node_modules/${folder}`
+        const isSymlink = fs.lstatSync(folderPath).isSymbolicLink()
+        if (isSymlink) {
+          prodDeps[topLevelFolderPath][folderPath] = true
+        }
+      }
+    }
 
-    return nextProdDeps
+    // If there are any org packages, then the org level has it's own entry in order
+    // to make the final watcher's filter easier to implement.
+    for (const topLevelFolderPath of Object.keys(prodDeps)) {
+      for (const depPackagePath of Object.keys(prodDeps[topLevelFolderPath])) {
+        if (depPackagePath.includes('node_modules/@')) {
+          // This is an org package.
+          const splitted = depPackagePath.split('/')
+          splitted.pop()
+          const orgPath = splitted.join('/')
+          prodDeps[topLevelFolderPath][orgPath] = true
+        }
+      }
+    }
+
+    // Finally, flatten everything:
+    const finalDepFolders = {}
+    for (const topLevelFolderPath of Object.keys(prodDeps)) {
+      for (const depPackagePath of Object.keys(prodDeps[topLevelFolderPath])) {
+        finalDepFolders[depPackagePath] = true
+      }
+    }
+
+    return finalDepFolders
   }
 
   const prodDeps = await getProdDeps()
@@ -682,45 +532,24 @@ ${c.yellow('Options:')}
       {
         interval: 0.1,
         filter: (file, stat) => {
-          // file = path.resolve(file)
           const isNodeModule = file.includes('node_modules')
           if (isNodeModule) {
-            // The file might be a path like root/node_modules/pkgA/src/file.js
-            // So escalade is used to go up to root/node_modules/pkgA,
-            // which is the folder containing the nearest package.json
-            const packagePath = escalade(file, (dir, names) => {
-              if (!dir.includes('node_modules')) {
-                // finding a package.json after this point is not valid.
-                return null
-              }
+            if (file.endsWith('node_modules')) return true
 
-              if (names.includes('package.json')) {
-                const packagePath = path.resolve(dir, 'package.json')
-                const pkg = fs.readJsonSync(packagePath)
-                if (pkg.name && pkg.version) {
-                  // sometimes, a bare package.json might exist in order
-                  // that file within a folder are treated with a different type.
-                  // For example, it would contain, {"type": "module"}
-                  // These kinds of package.jsons are not considered.
-                  // Only package.jsons with a name and version are considered.
-                  return packagePath
-                }
-              }
-            })
-            if (packagePath) {
-              // if moduleFolder could not be found,
-              // it is likely because escalade started on a path like root/node_modules/@org or root/node_modules.
-              const isProdDep = prodDeps[packagePath]
-              if (!isProdDep) {
-                // console.log('moduleFolder', packagePath)
-                return false
-              }
-            }
-          } else {
-            const isBin = file.includes('.bin')
-            if (isBin) {
-              return false
-            }
+            // node_modules/.bin is excluded under the assumption that you do not
+            // want to bundle .bin in your deploy-bundle.zip
+            // because you are probably not running CLI commands in prod.
+            // Todo: If you need .bin, then only executables coming from prod deps should be allowed.
+            if (file.endsWith('.bin')) return false
+
+            // Match up to node_module/packagename.
+            // Examples:
+            // src/common/node_modules/@aws-sdk/middleware-retry/
+            // src/common/node_modules/middleware-retry/
+            const match = (file + '/').match(/^(.+?\/node_modules\/(?:@.+?\/)?.+?\/)/) || []
+            const packagePath = match[1].slice(0, -1)
+            const include = prodDeps[packagePath]
+            return include
           }
           return true
         },
