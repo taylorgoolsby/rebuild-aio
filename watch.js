@@ -410,8 +410,8 @@ ${c.yellow('Options:')}
     //  on to the next top-level project.
 
     const prodDeps = {}
-    await new Promise((resolve, reject) => {
-      for (const dir of watchDirs) {
+    for (const dir of watchDirs) {
+      await new Promise((resolve, reject) => {
         watch.watchTree(
           dir,
           {
@@ -465,8 +465,8 @@ ${c.yellow('Options:')}
             resolve()
           }
         )
-      }
-    })
+      })
+    }
 
     // Symlinked deps via npm link are handled separately.
     // To catch these, go into a top-level project's node_modules, and look for
@@ -511,8 +511,6 @@ ${c.yellow('Options:')}
   }
 
   const prodDeps = await getProdDeps()
-
-  // console.log('prodDeps', prodDeps)
 
   for (const dir of watchDirs) {
     // Tell it what to watch
