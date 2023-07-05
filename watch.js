@@ -425,6 +425,7 @@ ${c.yellow('Options:')}
           async (f) => {
             if (typeof f === 'object') {
               for (const key of Object.keys(f)) {
+                // Only top-level package.json should be found because of filter.
                 const isPackageJson = key.endsWith('package.json')
                 if (!isPackageJson) continue
 
@@ -433,6 +434,7 @@ ${c.yellow('Options:')}
 
                 let newlyAdded = {}
 
+                // Add each dep in the top level package.json.
                 const topLevelPackage = fs.readJsonSync(key)
                 for (const depName of Object.keys(
                   topLevelPackage.dependencies || {}
@@ -448,13 +450,24 @@ ${c.yellow('Options:')}
                   for (const depFolderPath of Object.keys(newlyAdded)) {
                     // Add the deps of newlyAdded deps.
                     const depPackage = fs.readJsonSync(`${depFolderPath}/package.json`)
-                    for (const depName of Object.keys(
+                    for (const secondaryDepName of Object.keys(
                       depPackage.dependencies || {}
                     )) {
-                      const depFolderPath = `${topLevelFolderPath}/node_modules/${depName}`
-                      if (!prodDeps[topLevelFolderPath][depFolderPath]) {
-                        nextNewlyAdded[depFolderPath] = true
-                        prodDeps[topLevelFolderPath][depFolderPath] = true
+                      // If two packages have the same dep but with different versions,
+                      // then one dep will be installed flat under topLevelFolderPath/node_modules,
+                      // but the other version of the dep will be installed nested, in
+                      // topLevelFolderPath/node_modules/dep/node_modules/sharedDep
+
+                      // Check nested install first:
+                      let secondaryDepFolderPath = `${depFolderPath}/node_modules/${secondaryDepName}`
+                      if (!fs.pathExistsSync(secondaryDepFolderPath)) {
+                        // If there is no nested install, then it must be a flat install:
+                        secondaryDepFolderPath = `${topLevelFolderPath}/node_modules/${secondaryDepName}`
+                      }
+
+                      if (!prodDeps[topLevelFolderPath][secondaryDepFolderPath]) {
+                        nextNewlyAdded[secondaryDepFolderPath] = true
+                        prodDeps[topLevelFolderPath][secondaryDepFolderPath] = true
                       }
                     }
                   }
