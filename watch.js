@@ -377,16 +377,24 @@ ${c.yellow('Options:')}
           'Returned value from custom transformer is not a string.'
         )
       }
-      fs.writeFileSync(filepath, newContents, { encoding: 'utf-8' })
-      restart()
+      fs.writeFile(filepath, newContents, { encoding: 'utf-8' }, (err) => {
+        if (err) {
+          console.error(err)
+        }
+        restart()
+      })
     } else {
       if (shouldLog) {
         console.log(
           `${c.green('[monitor]')} ${c.grey(`${c.blue('copying')} ${f}`)}`
         )
       }
-      fs.copySync(originalPath, filepath)
-      restart()
+      fs.copyFile(originalPath, filepath, (err) => {
+        if (err) {
+          console.error(err)
+        }
+        restart()
+      })
     }
   }
 
