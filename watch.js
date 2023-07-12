@@ -458,11 +458,17 @@ ${c.yellow('Options:')}
                       // but the other version of the dep will be installed nested, in
                       // topLevelFolderPath/node_modules/dep/node_modules/sharedDep
 
-                      // Check nested install first:
-                      let secondaryDepFolderPath = `${depFolderPath}/node_modules/${secondaryDepName}`
-                      if (!fs.pathExistsSync(secondaryDepFolderPath)) {
-                        // If there is no nested install, then it must be a flat install:
-                        secondaryDepFolderPath = `${topLevelFolderPath}/node_modules/${secondaryDepName}`
+                      // Starting from nesting install path,
+                      // move up folders until a node_modules install is found:
+                      const secondaryDepFolderPath = escalade(depFolderPath, (dir, names) => {
+                        const installPath = `${dir}/node_modules/${secondaryDepName}`
+                        if (fs.pathExistsSync(installPath)) {
+                          return installPath
+                        }
+                      })
+
+                      if (!secondaryDepFolderPath) {
+                        throw new Error(`Unable to find node_module install for ${c.red(secondaryDepName)} which is listed as a dependency in file://${path.resolve(depFolderPath)}/package.json`)
                       }
 
                       if (!prodDeps[topLevelFolderPath][secondaryDepFolderPath]) {
