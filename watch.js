@@ -444,6 +444,22 @@ ${c.yellow('Options:')}
                   prodDeps[topLevelFolderPath][depFolderPath] = true
                 }
 
+                // Packages installed using npm link might not be listed in package.json dependencies.
+                // To catch these, go into a top-level project's node_modules, and look for
+                // folders which are symlinked.
+                // When you find a symlinked folder, add it to the prod deps.
+                // todo: Do symlinks for orgs need to be considered?
+                const folders = fs.readdirSync(`${topLevelFolderPath}/node_modules`)
+                for (const folder of folders) {
+                  if (folder.startsWith('.')) continue
+                  const folderPath = `${topLevelFolderPath}/node_modules/${folder}`
+                  const isSymlink = fs.lstatSync(folderPath).isSymbolicLink()
+                  if (isSymlink) {
+                    newlyAdded[folderPath] = true
+                    prodDeps[topLevelFolderPath][folderPath] = true
+                  }
+                }
+
                 let nextNewlyAdded
                 while (Object.keys(newlyAdded).length) {
                   nextNewlyAdded = {}
@@ -478,6 +494,21 @@ ${c.yellow('Options:')}
                         prodDeps[topLevelFolderPath][secondaryDepFolderPath] = true
                       }
                     }
+
+                    // There might be an npm link package which is not listed in `${depFolderPath}/package.json`.
+                    // Again, look for symlinks:
+                    if (fs.pathExistsSync(`${depFolderPath}/node_modules`)) {
+                      const folders = fs.readdirSync(`${depFolderPath}/node_modules`)
+                      for (const folder of folders) {
+                        if (folder.startsWith('.')) continue
+                        const folderPath = `${depFolderPath}/node_modules/${folder}`
+                        const isSymlink = fs.lstatSync(folderPath).isSymbolicLink()
+                        if (isSymlink) {
+                          nextNewlyAdded[folderPath] = true
+                          prodDeps[topLevelFolderPath][folderPath] = true
+                        }
+                      }
+                    }
                   }
                   newlyAdded = nextNewlyAdded
                 }
@@ -487,23 +518,6 @@ ${c.yellow('Options:')}
           }
         )
       })
-    }
-
-    // Symlinked deps via npm link are handled separately.
-    // To catch these, go into a top-level project's node_modules, and look for
-    // folders which are symlinked.
-    // When you find a symlinked folder, add it to the prod deps.
-    for (const topLevelFolderPath of Object.keys(prodDeps)) {
-      // todo: Do symlinks for orgs need to be considered?
-      const folders = fs.readdirSync(`${topLevelFolderPath}/node_modules`)
-      for (const folder of folders) {
-        if (folder.startsWith('.')) continue
-        const folderPath = `${topLevelFolderPath}/node_modules/${folder}`
-        const isSymlink = fs.lstatSync(folderPath).isSymbolicLink()
-        if (isSymlink) {
-          prodDeps[topLevelFolderPath][folderPath] = true
-        }
-      }
     }
 
     // If there are any org packages, then the org level has it's own entry in order
@@ -565,7 +579,7 @@ ${c.yellow('Options:')}
             // Examples:
             // src/common/node_modules/@aws-sdk/middleware-retry/
             // src/common/node_modules/middleware-retry/
-            const match = (file + '/').match(/^(.+?\/node_modules\/(?:@.+?\/)?.+?\/)/) || []
+            const match = (file + '/').match(/^(.+?\/(?:node_modules\/(?:@.+?\/)?.+?\/)+)/) || []
             const packagePath = match[1].slice(0, -1)
             const include = prodDeps[packagePath]
             return include
