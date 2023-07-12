@@ -460,7 +460,7 @@ ${c.yellow('Options:')}
 
                       // Starting from nesting install path,
                       // move up folders until a node_modules install is found:
-                      const secondaryDepFolderPath = escalade(depFolderPath, (dir, names) => {
+                      let secondaryDepFolderPath = escalade(depFolderPath, (dir, names) => {
                         const installPath = `${dir}/node_modules/${secondaryDepName}`
                         if (fs.pathExistsSync(installPath)) {
                           return installPath
@@ -470,6 +470,8 @@ ${c.yellow('Options:')}
                       if (!secondaryDepFolderPath) {
                         throw new Error(`Unable to find node_module install for ${c.red(secondaryDepName)} which is listed as a dependency in file://${path.resolve(depFolderPath)}/package.json`)
                       }
+
+                      secondaryDepFolderPath = path.relative(path.resolve('./'), secondaryDepFolderPath)
 
                       if (!prodDeps[topLevelFolderPath][secondaryDepFolderPath]) {
                         nextNewlyAdded[secondaryDepFolderPath] = true
