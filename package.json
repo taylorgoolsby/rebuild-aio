@@ -32,7 +32,6 @@
     "cross-port-killer": "1.4.0",
     "delay": "^6.0.0",
     "escalade": "3.1.1",
-    "fast-equals": "5.0.1",
     "fs-extra": "11.1.0",
     "lodash.debounce": "4.0.8",
     "micromatch": "4.0.5",
