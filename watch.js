@@ -105,18 +105,18 @@ const transform = transformer
     }
 const clean = cleaner
   ? (await import(path.resolve(cleaner))).default
-  : async (child, spawnerType, signal) => {
+  : async (execution, spawnerType, signal) => {
       if (signal === 'SIGINT') {
-        console.log(`${c.green('[monitor]')} ${c.grey('SIGINT')}`)
-        child.kill('SIGINT') // child is expected to exit on its own
+        console.log(`${c.green('[monitor]')} ${c.grey('SIGINT')} ${c.grey(execution.command)}`)
+        execution.child.kill('SIGINT') // child is expected to exit on its own
       } else {
         // SIGRES signal handling:
         if (spawnerType === 'spawn') {
-          console.log(`${c.green('[monitor]')} ${c.grey('SIGTERM')}`)
-          child.kill()
+          console.log(`${c.green('[monitor]')} ${c.grey('SIGTERM')} ${c.grey(execution.command)}`)
+          execution.child.kill()
         } else if (spawnerType === 'fork') {
-          console.log(`${c.green('[monitor]')} ${c.grey('SIGRES')}`)
-          child.send('SIGRES') // child is expected to exit on its own
+          console.log(`${c.green('[monitor]')} ${c.grey('SIGRES')} ${c.grey(execution.command)}`)
+          execution.child.send('SIGRES') // child is expected to exit on its own
         }
       }
     }
@@ -126,6 +126,20 @@ fs.ensureDirSync(outDir)
 
 let children = {} // key is command, value is {type: 'spawn' | 'fork', child}
 
+const finalPortKilling = async () => {
+  for (const port of killPorts) {
+    console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
+    await kill(port)
+  }
+
+  console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
+  process.exit()
+}
+
+process.on('uncaughtException', async (err, origin) => {
+  await finalPortKilling()
+});
+
 let sigintHandled = false
 process.on('SIGINT', () => {
   if (sigintHandled) {
@@ -133,46 +147,39 @@ process.on('SIGINT', () => {
   }
   sigintHandled = true
 
-  let cleanupTimeout
-
-  const finalPortKilling = async () => {
-    if (Object.keys(children).length !== 0) {
-      // all children should have exited by now.
-      return
-    }
-
-    if (cleanupTimeout) {
-      clearTimeout(cleanupTimeout)
-      cleanupTimeout = null
-    }
-
-    for (const port of killPorts) {
-      console.log(`${c.green('[monitor]')} ${c.grey(`killed port ${port}`)}`)
-      await kill(port)
-    }
-
-    console.log(`${c.green('[monitor]')} ${c.red('stopped')}`)
-    process.exit()
-  }
-
   if (Object.keys(children).length) {
     for (const execution of Object.values(children)) {
-      execution.child.on('exit', finalPortKilling)
-      clean(execution.child, execution.type, 'SIGINT') // should send the SIGINT signal to the child, which causes it to exit.
+      if (execution.killTimeout) {
+        clearTimeout(execution.killTimeout)
+        delete execution.killTimeout
+      }
+
+      execution.child.on('exit', async () => {
+        delete children[execution.command]
+
+        if (execution.killTimeout) {
+          clearTimeout(execution.killTimeout)
+          delete execution.killTimeout
+        }
+
+        if (Object.keys(children).length === 0) {
+          await finalPortKilling()
+        }
+      })
+      clean(execution, execution.type, 'SIGINT') // should send the SIGINT signal to the child, which causes it to exit.
         .catch((err) => {
           console.error(err)
         })
+      execution.killTimeout = setTimeout(() => {
+        console.log(
+          `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGINT ${execution.command}`)}`
+        )
+        for (const execution of Object.values(children)) {
+          execution.child.kill()
+        }
+        // finalPortKilling should be triggered before of exiting children.
+      }, wait)
     }
-
-    cleanupTimeout = setTimeout(() => {
-      console.log(
-        `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`
-      )
-      for (const execution of Object.values(children)) {
-        execution.child.kill()
-      }
-      // finalPortKilling should be triggered before of exiting children.
-    }, wait)
   } else {
     finalPortKilling().catch((err) => {
       console.error(err)
@@ -182,12 +189,34 @@ process.on('SIGINT', () => {
 
 const makeChildren = async () => {
   for (const command of forkCommands) {
+    if (children[command]) {
+      // command is already running
+      continue
+    }
+
     console.log(
       `${c.green('[monitor]')} ${c.yellow('fork')} ${c.grey(command)}`
     )
     const child = fork(command.split(' ')[0], command.split(' ').slice(1), {
       stdio: ['pipe', process.stdout, process.stderr, 'ipc'],
     })
+    child.on('exit', (code) => {
+      delete children[command]
+
+      if (code !== 0) {
+        crashDetected = true
+        console.log(
+          `${c.green('[monitor]')} ${c.red(`crash`)} ${c.grey(command)}`
+        )
+      } else {
+        console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
+      }
+    })
+    children[command] = {
+      type: 'fork',
+      child,
+      command
+    }
     const spawnPromise = new Promise((resolve, reject) => {
       child.on('spawn', () => {
         resolve()
@@ -227,6 +256,7 @@ const makeChildren = async () => {
               )
             }
             wait = false
+            resolve()
           }
         }
       })
@@ -241,25 +271,15 @@ const makeChildren = async () => {
       }
       resolve()
     })
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        crashDetected = true
-        console.log(
-          `${c.green('[monitor]')} ${c.red(`crash`)} ${c.grey(command)}`
-        )
-      } else {
-        console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
-      }
-      delete children[command]
-    })
-    children[command] = {
-      type: 'fork',
-      child,
-    }
     await continuePromise
   }
 
   for (const command of spawnCommands) {
+    if (children[command]) {
+      // command is already running
+      continue
+    }
+
     console.log(
       `${c.green('[monitor]')} ${c.yellow('spawn')} ${c.grey(command)}`
     )
@@ -267,6 +287,8 @@ const makeChildren = async () => {
       stdio: ['pipe', process.stdout, process.stderr],
     })
     child.on('exit', (code) => {
+      delete children[command]
+
       if (code !== 0) {
         crashDetected = true
         console.log(
@@ -275,11 +297,11 @@ const makeChildren = async () => {
       } else {
         console.log(`${c.green('[monitor]')} ${c.grey(`exit ${command}`)}`)
       }
-      delete children[command]
     })
     children[command] = {
       type: 'spawn',
       child,
+      command
     }
   }
 }
@@ -294,41 +316,40 @@ const restart = debounce(() => {
     return
   }
   if (Object.keys(children).length) {
-    let killTimeout
-    if (killTimeout) {
-      clearTimeout(killTimeout)
-      killTimeout = null
-    }
     // kill child before calling makeChildren
     console.log(`${c.green('[monitor]')} ${c.yellow('restarting...')}`)
     for (const execution of Object.values(children)) {
+      if (execution.killTimeout) {
+        clearTimeout(execution.killTimeout)
+        delete execution.killTimeout
+      }
+
       execution.child.on('exit', () => {
-        if (Object.keys(children).length !== 0) {
-          // all children should have exited by now.
-          return
+        delete children[execution.command]
+
+        if (execution.killTimeout) {
+          clearTimeout(execution.killTimeout)
+          delete execution.killTimeout
         }
 
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
+        if (Object.keys(children).length === 0) {
+          // all children have stopped
+          makeChildren().catch((err) => {
+            console.error(err)
+          })
         }
-        makeChildren().catch((err) => {
-          console.error(err)
-        })
       })
-      clean(execution.child, execution.type, 'SIGRES').catch((err) => {
+      clean(execution, execution.type, 'SIGRES').catch((err) => {
         console.error(err)
       })
-    }
-    killTimeout = setTimeout(() => {
-      console.log(
-        `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGTERM`)}`
-      )
-      // when the program restarts, if the forked process does not exit, then kill it after `wait` time.
-      for (const execution of Object.values(children)) {
+      execution.killTimeout = setTimeout(() => {
+        console.log(
+          `${c.green('[monitor]')} ${c.grey(`${c.yellow('timeout')} SIGRES ${execution.command}`)}`
+        )
+        // when the program restarts, if the forked process does not exit, then kill it after `wait` time.
         execution.child.kill()
-      }
-    }, wait)
+      }, wait)
+    }
   } else {
     if (crashDetected) {
       console.log(
