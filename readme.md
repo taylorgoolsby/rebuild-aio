@@ -199,8 +199,9 @@ await start(port)
 process.send({
   resumeForking: true // Tell rebuild-aio to resume forking after mysql has started.
 })
-
 ```
+
+By default, for each child, the monitor will wait 500 ms or for a `resumeForking` message, whichever comes first, before continuing. A child can send `resumeForking` at the beginning of its script, without ever sending `pauseForking`, in order to speed up restart times.
 
 ## Useful Globs
 
