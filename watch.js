@@ -673,40 +673,40 @@ for (const dir of watchDirs) {
         `${c.yellow('built')} ${dir} -> ${outDir}`
       )}`
     )
-    process.exit()
-  }
-
-  watcher.on('add', async f => {
-    await pass(f)
-  })
-  watcher.on('addDir', async f => {
-    await pass(f)
-  })
-  watcher.on('change', async f => {
-    await pass(f)
-  })
-  watcher.on('unlink', f => {
-    const filepath = getOutDirPath(f)
-    fs.removeSync(filepath)
-    const shortFilepath = path.relative(process.cwd(), filepath)
-    console.log(
-      `${c.green('[monitor]')} ${c.grey(
-        `${c.red('removed')} ${shortFilepath}`
-      )}`
-    )
-    restart()
-  })
-  watcher.on('unlinkDir', f => {
-    const filepath = getOutDirPath(f)
-    fs.removeSync(filepath)
-    const shortFilepath = path.relative(process.cwd(), filepath)
-    if (debug) {
+    watcher.close()
+  } else {
+    watcher.on('add', async f => {
+      await pass(f)
+    })
+    watcher.on('addDir', async f => {
+      await pass(f)
+    })
+    watcher.on('change', async f => {
+      await pass(f)
+    })
+    watcher.on('unlink', f => {
+      const filepath = getOutDirPath(f)
+      fs.removeSync(filepath)
+      const shortFilepath = path.relative(process.cwd(), filepath)
       console.log(
         `${c.green('[monitor]')} ${c.grey(
-          `removed dir ${shortFilepath}`
+          `${c.red('removed')} ${shortFilepath}`
         )}`
       )
-    }
-  })
+      restart()
+    })
+    watcher.on('unlinkDir', f => {
+      const filepath = getOutDirPath(f)
+      fs.removeSync(filepath)
+      const shortFilepath = path.relative(process.cwd(), filepath)
+      if (debug) {
+        console.log(
+          `${c.green('[monitor]')} ${c.grey(
+            `removed dir ${shortFilepath}`
+          )}`
+        )
+      }
+    })
+  }
 }
 watchersSetup = true
