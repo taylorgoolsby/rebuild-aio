@@ -569,7 +569,10 @@ async function getProdDeps() {
         for (const file of watchedFlat) {
           const isPackageJson = file.endsWith('package.json')
           if (!isPackageJson) continue
-          addProdDeps(file, prodDeps)
+          const isTopLevel = file === `${dir}/package.json`
+          if (isTopLevel) {
+            addProdDeps(file, prodDeps)
+          }
         }
         watcher.close()
         resolve()
