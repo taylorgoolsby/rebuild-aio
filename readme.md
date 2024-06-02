@@ -88,13 +88,15 @@ export default async function transform(filepath, outputPath, contents) {
 }
 ```
 
-## --fork or --spawn
+## --fork, --spawn, --exec
 
 `--fork` causes the child process to be created using `fork`. This is useful for implementing graceful restarts.
 
 The argument passed to `--fork` must be an ES module, I.E. a JS file. It cannot run CLI commands directly.
 
 `--spawn` causes the child process to be created using `spawn`, but restarts terminate the process abruptly.
+
+`--exec` uses `execSync` to run the specified command. This is useful for running CLI commands directly on restarts.
 
 ## SIGTERM
 

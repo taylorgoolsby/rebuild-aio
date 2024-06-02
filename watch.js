@@ -3,7 +3,7 @@
 import minimist from 'minimist'
 import chokidar from 'chokidar'
 import c from 'ansi-colors'
-import { fork, spawn } from 'child_process'
+import { fork, spawn, execSync } from 'child_process'
 import fs from 'fs-extra'
 import path from 'path'
 import micromatch from 'micromatch'
@@ -24,6 +24,7 @@ if (help) {
     --output <dir> \\
     [--fork <string>] \\
     [--spawn <string>] \\ 
+    [--exec <string>] \\
     [--kill <number>] \\
     [--wait <number>] \\
     [--debug]
@@ -46,6 +47,9 @@ ${c.yellow('Options:')}
       'The restart command. Optional. If omitted, then rebuild will exit after the first build.'
     )}
     --spawn -s        ${c.grey(
+      'The restart command. Optional. If omitted, no rebuilding or monitoring happens.'
+    )}
+    --exec -e        ${c.grey(
       'The restart command. Optional. If omitted, no rebuilding or monitoring happens.'
     )}
     --cleanup -c      ${c.grey(
@@ -74,6 +78,8 @@ const f = argv['fork'] || argv['f']
 const forkCommands = Array.isArray(f) ? f : [f].filter((a) => !!a)
 const s = argv['spawn'] || argv['s']
 const spawnCommands = Array.isArray(s) ? s : [s].filter((a) => !!a)
+const e = argv['exec'] || argv['e']
+const execCommands = Array.isArray(e) ? e : [e].filter((a) => !!a)
 const debug = argv['d'] || argv['debug']
 const k = argv['k'] || argv['kill']
 const killPorts = Array.isArray(k) ? k : [k].filter((a) => !!a)
@@ -121,7 +127,7 @@ const clean = cleaner
       }
     }
 
-fs.removeSync(outDir)
+// fs.removeSync(outDir) do not delete the dir to allow multiple concurrent rebuild-aio commands to add to the same output dir.
 fs.ensureDirSync(outDir)
 
 let children = {} // key is command, value is {type: 'spawn' | 'fork', child}
@@ -137,6 +143,7 @@ const finalPortKilling = async () => {
 }
 
 process.on('uncaughtException', async (err, origin) => {
+  console.error(err)
   await finalPortKilling()
 });
 
@@ -304,6 +311,15 @@ const makeChildren = async () => {
       command
     }
   }
+
+  for (const command of execCommands) {
+    console.log(
+      `${c.green('[monitor]')} ${c.yellow('exec')} ${c.grey(command)}`
+    )
+    execSync(command, {
+      stdio: ['pipe', process.stdout, process.stderr],
+    })
+  }
 }
 
 let crashDetected = false
@@ -312,7 +328,7 @@ const restart = debounce(() => {
     return
   }
 
-  if (forkCommands.length === 0 && spawnCommands.length === 0) {
+  if (forkCommands.length === 0 && spawnCommands.length === 0 && execCommands.length === 0) {
     return
   }
   if (Object.keys(children).length) {
@@ -610,7 +626,7 @@ const prodDeps = await getProdDeps()
 let watchersSetup = false
 for (const dir of watchDirs) {
   // Tell it what to watch
-  if (forkCommands.length || spawnCommands.length) {
+  if (forkCommands.length || spawnCommands.length || execCommands.length) {
     console.log(
       `${c.green('[monitor]')} ${c.grey(`${c.yellow('watching')} ${dir}`)}`
     )
@@ -669,7 +685,7 @@ for (const dir of watchDirs) {
     await pass(key)
     restart()
   }
-  if (!(forkCommands.length || spawnCommands.length)) {
+  if (!(forkCommands.length || spawnCommands.length || execCommands.length)) {
     // No command, so exit after building instead of watching.
     console.log(
       `${c.green('[monitor]')} ${c.grey(
